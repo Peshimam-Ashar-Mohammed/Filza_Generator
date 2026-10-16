@@ -1,6 +1,6 @@
 /**
- * Filza Motion AI - User Interface & Interaction Module
- * Manages Video Studio, Image Studio, Custom Players, Gallery, and Toasts.
+ * Filza Motion AI - User Interface & Page View Manager (v1.3)
+ * Controls Top Bar Page Swapping (Video vs Image), Custom Players, Gallery, and Toasts.
  */
 
 import { CONFIG } from './config.js';
@@ -9,7 +9,7 @@ import { downloadMediaBlob } from './inference-client.js';
 
 export class UIManager {
   constructor() {
-    this.currentTab = 'video'; // 'video' | 'image'
+    this.currentPage = 'video'; // 'video' | 'image'
     this.timerInterval = null;
     this.startTime = null;
     this.elements = {};
@@ -23,23 +23,23 @@ export class UIManager {
     this._setupInputListeners();
     this._setupVideoPlayerControls();
     this._setupImageActions();
-    this._setupTabs();
+    this._setupTopBarPageSwitcher();
   }
 
   _cacheElements() {
     this.elements = {
-      // Tabs
-      tabVideoBtn: document.getElementById('tab-video-btn'),
-      tabImageBtn: document.getElementById('tab-image-btn'),
-      videoStudioForm: document.getElementById('video-studio-form'),
-      imageStudioForm: document.getElementById('image-studio-form'),
+      // Top Bar Page Switcher Buttons & Page Views
+      navVideoBtn: document.getElementById('nav-video-btn'),
+      navImageBtn: document.getElementById('nav-image-btn'),
+      pageVideo: document.getElementById('page-video'),
+      pageImage: document.getElementById('page-image'),
 
       // Cluster status
       clusterStatusBadge: document.getElementById('cluster-status-badge'),
       clusterStatusText: document.getElementById('cluster-status-text'),
       clusterDot: document.getElementById('cluster-dot'),
 
-      // Video Form Elements
+      // Video Controls
       videoPromptInput: document.getElementById('video-prompt-input'),
       videoCharCounter: document.getElementById('video-char-counter'),
       videoPromptFeedback: document.getElementById('video-prompt-feedback'),
@@ -50,7 +50,7 @@ export class UIManager {
       btnGenerateVideo: document.getElementById('btn-generate-video'),
       btnGenerateVideoText: document.getElementById('btn-generate-video-text'),
 
-      // Image Form Elements
+      // Image Controls
       imagePromptInput: document.getElementById('image-prompt-input'),
       imageCharCounter: document.getElementById('image-char-counter'),
       imagePromptFeedback: document.getElementById('image-prompt-feedback'),
@@ -73,7 +73,7 @@ export class UIManager {
       elapsedTimer: document.getElementById('elapsed-timer'),
       btnCancelGeneration: document.getElementById('btn-cancel-generation'),
 
-      // Video Result
+      // Video Result Showcase
       resultPanel: document.getElementById('result-panel'),
       videoPlayer: document.getElementById('video-player'),
       metaResolution: document.getElementById('meta-resolution'),
@@ -98,7 +98,7 @@ export class UIManager {
       videoSeekbar: document.getElementById('video-seekbar'),
       speedSelect: document.getElementById('speed-select'),
 
-      // Image Result
+      // Image Result Showcase
       imageResultPanel: document.getElementById('image-result-panel'),
       imagePreviewEl: document.getElementById('image-preview-el'),
       imageMetaDimensions: document.getElementById('image-meta-dimensions'),
@@ -115,28 +115,74 @@ export class UIManager {
     };
   }
 
-  _setupTabs() {
-    const { tabVideoBtn, tabImageBtn, videoStudioForm, imageStudioForm } = this.elements;
+  /**
+   * Configures the prominent TOP BAR page switcher
+   */
+  _setupTopBarPageSwitcher() {
+    const { navVideoBtn, navImageBtn } = this.elements;
 
-    tabVideoBtn.addEventListener('click', () => {
-      this.currentTab = 'video';
-      tabVideoBtn.classList.add('active');
-      tabImageBtn.classList.remove('active');
-      videoStudioForm.classList.remove('hidden');
-      imageStudioForm.classList.add('hidden');
-    });
+    if (navVideoBtn) {
+      navVideoBtn.addEventListener('click', () => {
+        this.switchPage('video');
+      });
+    }
 
-    tabImageBtn.addEventListener('click', () => {
-      this.currentTab = 'image';
-      tabImageBtn.classList.add('active');
-      tabVideoBtn.classList.remove('active');
-      imageStudioForm.classList.remove('hidden');
-      videoStudioForm.classList.add('hidden');
-    });
+    if (navImageBtn) {
+      navImageBtn.addEventListener('click', () => {
+        this.switchPage('image');
+      });
+    }
+
+    // Support initial hash routing (e.g. #image or #video)
+    if (window.location.hash === '#image') {
+      this.switchPage('image', false);
+    } else {
+      this.switchPage('video', false);
+    }
+  }
+
+  /**
+   * Swaps between Video Generation and Image Generation full pages
+   * @param {'video'|'image'} pageName
+   * @param {boolean} [updateHash=true]
+   */
+  switchPage(pageName, updateHash = true) {
+    this.currentPage = pageName;
+    const { navVideoBtn, navImageBtn, pageVideo, pageImage } = this.elements;
+
+    if (pageName === 'video') {
+      if (navVideoBtn) {
+        navVideoBtn.classList.add('active');
+        navVideoBtn.setAttribute('aria-selected', 'true');
+      }
+      if (navImageBtn) {
+        navImageBtn.classList.remove('active');
+        navImageBtn.setAttribute('aria-selected', 'false');
+      }
+      if (pageVideo) pageVideo.classList.remove('hidden');
+      if (pageImage) pageImage.classList.add('hidden');
+      if (updateHash) history.replaceState(null, '', '#video');
+      document.title = 'Filza Motion AI — Free Text-to-Video Generator';
+    } else {
+      if (navImageBtn) {
+        navImageBtn.classList.add('active');
+        navImageBtn.setAttribute('aria-selected', 'true');
+      }
+      if (navVideoBtn) {
+        navVideoBtn.classList.remove('active');
+        navVideoBtn.setAttribute('aria-selected', 'false');
+      }
+      if (pageImage) pageImage.classList.remove('hidden');
+      if (pageVideo) pageVideo.classList.add('hidden');
+      if (updateHash) history.replaceState(null, '', '#image');
+      document.title = 'Filza Motion AI — Free Text-to-Image Studio';
+    }
+
+    // Scroll to top smoothly
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   _renderVideoControls() {
-    // Render video models
     const container = this.elements.modelsContainer;
     if (container) {
       container.innerHTML = '';
@@ -151,7 +197,7 @@ export class UIManager {
           </div>
           <p class="card-desc">${m.description}</p>
         `;
-        label.querySelector('input').addEventListener('change', () => {
+        label.querySelector('input')?.addEventListener('change', () => {
           container.querySelectorAll('.model-radio-card').forEach(el => el.classList.remove('active'));
           label.classList.add('active');
         });
@@ -159,7 +205,6 @@ export class UIManager {
       });
     }
 
-    // Render motion options
     const select = this.elements.motionSelect;
     if (select) {
       select.innerHTML = '';
@@ -172,7 +217,6 @@ export class UIManager {
       });
     }
 
-    // Render steps
     const stepsContainer = this.elements.stepsContainer;
     if (stepsContainer) {
       stepsContainer.innerHTML = '';
@@ -184,7 +228,7 @@ export class UIManager {
           <div class="pill-title">${step.name}</div>
           <div class="pill-meta">${step.approxTime} · <span class="pill-badge">${step.badge}</span></div>
         `;
-        label.querySelector('input').addEventListener('change', () => {
+        label.querySelector('input')?.addEventListener('change', () => {
           stepsContainer.querySelectorAll('.step-radio-pill').forEach(el => el.classList.remove('active'));
           label.classList.add('active');
         });
@@ -194,7 +238,6 @@ export class UIManager {
   }
 
   _renderImageControls() {
-    // Render Aspect Ratios
     const ratioContainer = this.elements.aspectRatiosContainer;
     if (ratioContainer) {
       ratioContainer.innerHTML = '';
@@ -207,7 +250,7 @@ export class UIManager {
           <div class="ratio-title">${r.name}</div>
           <div class="ratio-dim">${r.width}×${r.height}</div>
         `;
-        label.querySelector('input').addEventListener('change', () => {
+        label.querySelector('input')?.addEventListener('change', () => {
           ratioContainer.querySelectorAll('.aspect-ratio-card').forEach(el => el.classList.remove('active'));
           label.classList.add('active');
         });
@@ -215,7 +258,6 @@ export class UIManager {
       });
     }
 
-    // Render Image Models
     const modelContainer = this.elements.imageModelsContainer;
     if (modelContainer) {
       modelContainer.innerHTML = '';
@@ -230,7 +272,7 @@ export class UIManager {
           </div>
           <p class="card-desc">${m.description}</p>
         `;
-        label.querySelector('input').addEventListener('change', () => {
+        label.querySelector('input')?.addEventListener('change', () => {
           modelContainer.querySelectorAll('.model-radio-card').forEach(el => el.classList.remove('active'));
           label.classList.add('active');
         });
@@ -238,7 +280,6 @@ export class UIManager {
       });
     }
 
-    // Render Image Styles
     const styleContainer = this.elements.imageStylesContainer;
     if (styleContainer) {
       styleContainer.innerHTML = '';
@@ -283,12 +324,12 @@ export class UIManager {
         </div>
       `;
 
-      card.querySelector('.btn-use-prompt').addEventListener('click', () => {
+      card.querySelector('.btn-use-prompt')?.addEventListener('click', () => {
         if (isVideo) {
-          this.elements.tabVideoBtn.click();
+          this.switchPage('video');
           this.loadVideoPrompt(item);
         } else {
-          this.elements.tabImageBtn.click();
+          this.switchPage('image');
           this.loadImagePrompt(item);
         }
       });
@@ -298,59 +339,66 @@ export class UIManager {
   }
 
   _setupInputListeners() {
-    // Video prompt counter & Magic Enhance
     const vInput = this.elements.videoPromptInput;
     if (vInput) {
       const updateVCounter = () => {
         const res = validatePrompt(vInput.value);
-        this.elements.videoCharCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
-        if (res.warning) {
-          this.elements.videoPromptFeedback.textContent = res.warning;
-          this.elements.videoPromptFeedback.className = 'prompt-feedback warning';
-        } else {
-          this.elements.videoPromptFeedback.textContent = '';
-          this.elements.videoPromptFeedback.className = 'prompt-feedback';
+        if (this.elements.videoCharCounter) {
+          this.elements.videoCharCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
+        }
+        if (this.elements.videoPromptFeedback) {
+          if (res.warning) {
+            this.elements.videoPromptFeedback.textContent = res.warning;
+            this.elements.videoPromptFeedback.className = 'prompt-feedback warning';
+          } else {
+            this.elements.videoPromptFeedback.textContent = '';
+            this.elements.videoPromptFeedback.className = 'prompt-feedback';
+          }
         }
       };
       vInput.addEventListener('input', updateVCounter);
       updateVCounter();
 
-      this.elements.btnMagicEnhanceVideo.addEventListener('click', () => {
-        const enhanced = enhancePrompt(vInput.value, 'video');
-        if (enhanced) {
-          vInput.value = enhanced;
-          updateVCounter();
-          this.showToast('🪄 Prompt enhanced with 8K cinematic lighting and motion cues!', 'success');
-        }
-      });
+      if (this.elements.btnMagicEnhanceVideo) {
+        this.elements.btnMagicEnhanceVideo.addEventListener('click', () => {
+          const enhanced = enhancePrompt(vInput.value, 'video');
+          if (enhanced) {
+            vInput.value = enhanced;
+            updateVCounter();
+            this.showToast('🪄 Prompt enhanced with 8K cinematic lighting and motion cues!', 'success');
+          }
+        });
+      }
     }
 
-    // Image prompt counter & Magic Enhance
     const iInput = this.elements.imagePromptInput;
     if (iInput) {
       const updateICounter = () => {
         const res = validatePrompt(iInput.value);
-        this.elements.imageCharCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
+        if (this.elements.imageCharCounter) {
+          this.elements.imageCharCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
+        }
       };
       iInput.addEventListener('input', updateICounter);
       updateICounter();
 
-      this.elements.btnMagicEnhanceImage.addEventListener('click', () => {
-        const activeStyle = this.elements.imageStylesContainer?.querySelector('.style-pill-btn.active')?.dataset.styleId || '';
-        const enhanced = enhancePrompt(iInput.value, 'image', activeStyle);
-        if (enhanced) {
-          iInput.value = enhanced;
-          updateICounter();
-          this.showToast('🪄 Prompt enhanced with professional composition details!', 'success');
-        }
-      });
+      if (this.elements.btnMagicEnhanceImage) {
+        this.elements.btnMagicEnhanceImage.addEventListener('click', () => {
+          const activeStyle = this.elements.imageStylesContainer?.querySelector('.style-pill-btn.active')?.dataset.styleId || '';
+          const enhanced = enhancePrompt(iInput.value, 'image', activeStyle);
+          if (enhanced) {
+            iInput.value = enhanced;
+            updateICounter();
+            this.showToast('🪄 Prompt enhanced with professional composition details!', 'success');
+          }
+        });
+      }
     }
 
-    // Quick tag pills for video
     document.querySelectorAll('.quick-tag-pill').forEach(pill => {
       pill.addEventListener('click', () => {
         const tag = pill.getAttribute('data-tag');
-        const activeInput = this.currentTab === 'video' ? this.elements.videoPromptInput : this.elements.imagePromptInput;
+        const activeInput = this.currentPage === 'video' ? this.elements.videoPromptInput : this.elements.imagePromptInput;
         if (!activeInput || !tag) return;
         const cur = activeInput.value.trim();
         activeInput.value = cur ? `${cur}, ${tag}` : tag;
@@ -367,26 +415,26 @@ export class UIManager {
     const togglePlay = () => {
       if (video.paused || video.ended) {
         video.play();
-        this.elements.btnPlayPauseIcon.innerHTML = `<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>`;
+        if (this.elements.btnPlayPauseIcon) this.elements.btnPlayPauseIcon.innerHTML = `<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>`;
       } else {
         video.pause();
-        this.elements.btnPlayPauseIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"/>`;
+        if (this.elements.btnPlayPauseIcon) this.elements.btnPlayPauseIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"/>`;
       }
     };
 
-    this.elements.btnPlayPause.addEventListener('click', togglePlay);
+    this.elements.btnPlayPause?.addEventListener('click', togglePlay);
     video.addEventListener('click', togglePlay);
 
-    // Mute
-    this.elements.btnMute.addEventListener('click', () => {
+    this.elements.btnMute?.addEventListener('click', () => {
       video.muted = !video.muted;
-      this.elements.btnMuteIcon.innerHTML = video.muted
-        ? `<path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>`
-        : `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>`;
+      if (this.elements.btnMuteIcon) {
+        this.elements.btnMuteIcon.innerHTML = video.muted
+          ? `<path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>`
+          : `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>`;
+      }
     });
 
-    // Fullscreen
-    this.elements.btnFullscreen.addEventListener('click', () => {
+    this.elements.btnFullscreen?.addEventListener('click', () => {
       const container = video.closest('.video-player-container');
       if (!document.fullscreenElement) {
         if (container?.requestFullscreen) container.requestFullscreen();
@@ -395,34 +443,34 @@ export class UIManager {
       }
     });
 
-    // Loop
-    this.elements.btnLoop.addEventListener('click', () => {
+    this.elements.btnLoop?.addEventListener('click', () => {
       video.loop = !video.loop;
       this.elements.btnLoop.classList.toggle('active', video.loop);
       this.showToast(video.loop ? 'Looping enabled' : 'Looping disabled', 'info');
     });
 
-    // Speed
-    this.elements.speedSelect.addEventListener('change', (e) => {
+    this.elements.speedSelect?.addEventListener('change', (e) => {
       video.playbackRate = parseFloat(e.target.value);
     });
 
-    // Seek
     video.addEventListener('timeupdate', () => {
       const cur = video.currentTime || 0;
       const dur = video.duration || 1;
-      this.elements.videoSeekbar.value = isNaN(cur / dur) ? 0 : (cur / dur) * 100;
-      const fmt = (t) => `${Math.floor(t / 60)}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
-      this.elements.videoTimeDisplay.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+      if (this.elements.videoSeekbar) {
+        this.elements.videoSeekbar.value = isNaN(cur / dur) ? 0 : (cur / dur) * 100;
+      }
+      if (this.elements.videoTimeDisplay) {
+        const fmt = (t) => `${Math.floor(t / 60)}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
+        this.elements.videoTimeDisplay.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+      }
     });
 
-    this.elements.videoSeekbar.addEventListener('input', (e) => {
+    this.elements.videoSeekbar?.addEventListener('input', (e) => {
       const dur = video.duration || 1;
       video.currentTime = (parseFloat(e.target.value) / 100) * dur;
     });
 
-    // Copy Link
-    this.elements.btnCopyVideoLink.addEventListener('click', async () => {
+    this.elements.btnCopyVideoLink?.addEventListener('click', async () => {
       if (!video.src) return;
       try {
         await navigator.clipboard.writeText(video.src);
@@ -432,8 +480,7 @@ export class UIManager {
       }
     });
 
-    // Download MP4
-    this.elements.btnDownloadMp4.addEventListener('click', async () => {
+    this.elements.btnDownloadMp4?.addEventListener('click', async () => {
       if (!video.src) return;
       const btn = this.elements.btnDownloadMp4;
       const orig = btn.innerHTML;
@@ -445,23 +492,24 @@ export class UIManager {
       this.showToast('MP4 download initiated!', 'success');
     });
 
-    this.elements.btnRefineVideoPrompt.addEventListener('click', () => {
-      document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
-      this.elements.videoPromptInput.focus();
+    this.elements.btnRefineVideoPrompt?.addEventListener('click', () => {
+      this.elements.videoPromptInput?.scrollIntoView({ behavior: 'smooth' });
+      this.elements.videoPromptInput?.focus();
     });
 
-    this.elements.btnGenerateAnotherVideo.addEventListener('click', () => {
-      document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
-      this.elements.videoPromptInput.value = '';
-      this.elements.videoPromptInput.dispatchEvent(new Event('input'));
-      this.elements.videoPromptInput.focus();
+    this.elements.btnGenerateAnotherVideo?.addEventListener('click', () => {
+      if (this.elements.videoPromptInput) {
+        this.elements.videoPromptInput.value = '';
+        this.elements.videoPromptInput.dispatchEvent(new Event('input'));
+        this.elements.videoPromptInput.focus();
+      }
+      this.elements.resultPanel?.classList.add('hidden');
     });
   }
 
   _setupImageActions() {
-    // Download Image
-    this.elements.btnDownloadImage.addEventListener('click', async () => {
-      const src = this.elements.imagePreviewEl.src;
+    this.elements.btnDownloadImage?.addEventListener('click', async () => {
+      const src = this.elements.imagePreviewEl?.src;
       if (!src) return;
       const btn = this.elements.btnDownloadImage;
       const orig = btn.innerHTML;
@@ -473,9 +521,8 @@ export class UIManager {
       this.showToast('Image downloaded successfully!', 'success');
     });
 
-    // Copy Image Link
-    this.elements.btnCopyImageLink.addEventListener('click', async () => {
-      const src = this.elements.imagePreviewEl.src;
+    this.elements.btnCopyImageLink?.addEventListener('click', async () => {
+      const src = this.elements.imagePreviewEl?.src;
       if (!src) return;
       try {
         await navigator.clipboard.writeText(src);
@@ -485,31 +532,35 @@ export class UIManager {
       }
     });
 
-    this.elements.btnGenerateAnotherImage.addEventListener('click', () => {
-      document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
-      this.elements.imagePromptInput.value = '';
-      this.elements.imagePromptInput.dispatchEvent(new Event('input'));
-      this.elements.imagePromptInput.focus();
+    this.elements.btnGenerateAnotherImage?.addEventListener('click', () => {
+      if (this.elements.imagePromptInput) {
+        this.elements.imagePromptInput.value = '';
+        this.elements.imagePromptInput.dispatchEvent(new Event('input'));
+        this.elements.imagePromptInput.focus();
+      }
+      this.elements.imageResultPanel?.classList.add('hidden');
     });
   }
 
   loadVideoPrompt(example) {
-    this.elements.videoPromptInput.value = example.prompt;
-    this.elements.videoPromptInput.dispatchEvent(new Event('input'));
+    if (this.elements.videoPromptInput) {
+      this.elements.videoPromptInput.value = example.prompt;
+      this.elements.videoPromptInput.dispatchEvent(new Event('input'));
+    }
     if (this.elements.motionSelect) this.elements.motionSelect.value = example.motion || '';
-    document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
     this.showToast(`Loaded video preset "${example.title}" into studio.`, 'info');
   }
 
   loadImagePrompt(example) {
-    this.elements.imagePromptInput.value = example.prompt;
-    this.elements.imagePromptInput.dispatchEvent(new Event('input'));
+    if (this.elements.imagePromptInput) {
+      this.elements.imagePromptInput.value = example.prompt;
+      this.elements.imagePromptInput.dispatchEvent(new Event('input'));
+    }
     const ratioRadio = this.elements.aspectRatiosContainer?.querySelector(`input[value="${example.aspectRatio}"]`);
     if (ratioRadio) {
       ratioRadio.checked = true;
       ratioRadio.dispatchEvent(new Event('change'));
     }
-    document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
     this.showToast(`Loaded image preset "${example.title}" into studio.`, 'info');
   }
 
@@ -522,11 +573,11 @@ export class UIManager {
 
     if (isOnline) {
       badge.className = 'status-pill online';
-      text.textContent = `ZeroGPU Cluster: Online (${latencyMs}ms)`;
+      text.textContent = `Cluster: Online (${latencyMs}ms)`;
       dot.className = 'pulse-dot green';
     } else {
       badge.className = 'status-pill warning';
-      text.textContent = `Cluster: Connecting / Standby (${error || 'Rechecking'})`;
+      text.textContent = `Cluster: Standby (${error || 'Rechecking'})`;
       dot.className = 'pulse-dot yellow';
     }
   }
@@ -534,14 +585,16 @@ export class UIManager {
   startTimer() {
     this.stopTimer();
     this.startTime = performance.now();
-    this.elements.elapsedTimer.textContent = '00:00.0';
+    if (this.elements.elapsedTimer) this.elements.elapsedTimer.textContent = '00:00.0';
     this.timerInterval = setInterval(() => {
       const elapsed = performance.now() - this.startTime;
       const totalSec = Math.floor(elapsed / 1000);
       const dec = Math.floor((elapsed % 1000) / 100);
       const min = Math.floor(totalSec / 60);
       const sec = totalSec % 60;
-      this.elements.elapsedTimer.textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${dec}`;
+      if (this.elements.elapsedTimer) {
+        this.elements.elapsedTimer.textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${dec}`;
+      }
     }, 100);
   }
 
@@ -554,143 +607,169 @@ export class UIManager {
 
   showQueuedState() {
     this.startTimer();
-    this.elements.statusPanel.classList.remove('hidden');
-    this.elements.resultPanel.classList.add('hidden');
-    this.elements.imageResultPanel.classList.add('hidden');
+    this.elements.statusPanel?.classList.remove('hidden');
+    this.elements.resultPanel?.classList.add('hidden');
+    this.elements.imageResultPanel?.classList.add('hidden');
 
-    this.elements.btnGenerateVideo.disabled = true;
-    this.elements.btnGenerateVideo.classList.add('loading');
-    this.elements.btnGenerateVideoText.textContent = 'Allocating GPU Queue...';
+    if (this.elements.btnGenerateVideo) {
+      this.elements.btnGenerateVideo.disabled = true;
+      this.elements.btnGenerateVideo.classList.add('loading');
+    }
+    if (this.elements.btnGenerateVideoText) {
+      this.elements.btnGenerateVideoText.textContent = 'Allocating GPU Queue...';
+    }
 
-    this.elements.statusOrb.className = 'status-orb queued';
-    this.elements.statusTitle.textContent = 'GPU Cluster Dispatch';
-    this.elements.statusSubtitle.textContent = 'Connecting to ZeroGPU dynamic resource scheduler...';
-    this.elements.progressBar.style.width = '15%';
-    this.elements.progressPercent.textContent = '15%';
-    this.elements.progressStepInfo.textContent = 'Allocating lightning tensor cores';
-    this.elements.queueRankBadge.textContent = 'Queue: Connecting';
-    this.elements.statusPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (this.elements.statusOrb) this.elements.statusOrb.className = 'status-orb queued';
+    if (this.elements.statusTitle) this.elements.statusTitle.textContent = 'GPU Cluster Dispatch';
+    if (this.elements.statusSubtitle) this.elements.statusSubtitle.textContent = 'Connecting to ZeroGPU dynamic resource scheduler...';
+    if (this.elements.progressBar) this.elements.progressBar.style.width = '15%';
+    if (this.elements.progressPercent) this.elements.progressPercent.textContent = '15%';
+    if (this.elements.progressStepInfo) this.elements.progressStepInfo.textContent = 'Allocating lightning tensor cores';
+    if (this.elements.queueRankBadge) this.elements.queueRankBadge.textContent = 'Queue: Connecting';
+    this.elements.statusPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   updateQueueRank({ rank, queueSize, etaSeconds }) {
-    this.elements.queueRankBadge.textContent = `Queue Position: #${rank + 1} of ${queueSize}`;
-    if (etaSeconds) {
+    if (this.elements.queueRankBadge) {
+      this.elements.queueRankBadge.textContent = `Queue Position: #${rank + 1} of ${queueSize}`;
+    }
+    if (etaSeconds && this.elements.statusSubtitle) {
       this.elements.statusSubtitle.textContent = `Estimated wait: ~${Math.round(etaSeconds)}s before diffusion starts.`;
     }
   }
 
   showProcessingState(mode = 'video') {
     if (mode === 'video') {
-      this.elements.btnGenerateVideoText.textContent = 'Denoising Latents...';
-      this.elements.statusOrb.className = 'status-orb processing';
-      this.elements.statusTitle.textContent = 'Synthesizing Cinema Video';
-      this.elements.statusSubtitle.textContent = 'Generating multi-frame motion coherence with AnimateDiff HD.';
-      this.elements.queueRankBadge.textContent = 'GPU Active (Processing)';
+      if (this.elements.btnGenerateVideoText) this.elements.btnGenerateVideoText.textContent = 'Denoising Latents...';
+      if (this.elements.statusOrb) this.elements.statusOrb.className = 'status-orb processing';
+      if (this.elements.statusTitle) this.elements.statusTitle.textContent = 'Synthesizing Cinema Video';
+      if (this.elements.statusSubtitle) this.elements.statusSubtitle.textContent = 'Generating multi-frame motion coherence with AnimateDiff HD.';
+      if (this.elements.queueRankBadge) this.elements.queueRankBadge.textContent = 'GPU Active (Processing)';
     } else {
       this.startTimer();
-      this.elements.statusPanel.classList.remove('hidden');
-      this.elements.imageResultPanel.classList.add('hidden');
-      this.elements.resultPanel.classList.add('hidden');
+      this.elements.statusPanel?.classList.remove('hidden');
+      this.elements.imageResultPanel?.classList.add('hidden');
+      this.elements.resultPanel?.classList.add('hidden');
 
-      this.elements.btnGenerateImage.disabled = true;
-      this.elements.btnGenerateImage.classList.add('loading');
-      this.elements.btnGenerateImageText.textContent = 'Rendering FLUX.1 Image...';
+      if (this.elements.btnGenerateImage) {
+        this.elements.btnGenerateImage.disabled = true;
+        this.elements.btnGenerateImage.classList.add('loading');
+      }
+      if (this.elements.btnGenerateImageText) {
+        this.elements.btnGenerateImageText.textContent = 'Rendering FLUX.1 Image...';
+      }
 
-      this.elements.statusOrb.className = 'status-orb processing';
-      this.elements.statusTitle.textContent = 'Synthesizing High-Res Image';
-      this.elements.statusSubtitle.textContent = 'FLUX.1 12B transformer is generating pixels...';
-      this.elements.progressBar.style.width = '60%';
-      this.elements.progressPercent.textContent = '60%';
-      this.elements.progressStepInfo.textContent = 'Neural latent decoding';
-      this.elements.queueRankBadge.textContent = 'Rendering';
+      if (this.elements.statusOrb) this.elements.statusOrb.className = 'status-orb processing';
+      if (this.elements.statusTitle) this.elements.statusTitle.textContent = 'Synthesizing High-Res Image';
+      if (this.elements.statusSubtitle) this.elements.statusSubtitle.textContent = 'FLUX.1 12B transformer is generating pixels...';
+      if (this.elements.progressBar) this.elements.progressBar.style.width = '60%';
+      if (this.elements.progressPercent) this.elements.progressPercent.textContent = '60%';
+      if (this.elements.progressStepInfo) this.elements.progressStepInfo.textContent = 'Neural latent decoding';
+      if (this.elements.queueRankBadge) this.elements.queueRankBadge.textContent = 'Rendering';
     }
   }
 
   updateProgress({ step, totalSteps, percent }) {
-    this.elements.progressBar.style.width = `${percent}%`;
-    this.elements.progressPercent.textContent = `${percent}%`;
-    this.elements.progressStepInfo.textContent = `Diffusion Step ${step} of ${totalSteps} (${percent}%)`;
+    if (this.elements.progressBar) this.elements.progressBar.style.width = `${percent}%`;
+    if (this.elements.progressPercent) this.elements.progressPercent.textContent = `${percent}%`;
+    if (this.elements.progressStepInfo) this.elements.progressStepInfo.textContent = `Diffusion Step ${step} of ${totalSteps} (${percent}%)`;
   }
 
   showCompletedState(result) {
     this.stopTimer();
-    this.elements.statusPanel.classList.add('hidden');
+    this.elements.statusPanel?.classList.add('hidden');
 
     if (result.type === 'video') {
-      this.elements.btnGenerateVideo.disabled = false;
-      this.elements.btnGenerateVideo.classList.remove('loading');
-      this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
+      if (this.elements.btnGenerateVideo) {
+        this.elements.btnGenerateVideo.disabled = false;
+        this.elements.btnGenerateVideo.classList.remove('loading');
+      }
+      if (this.elements.btnGenerateVideoText) this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
 
-      this.elements.resultPanel.classList.remove('hidden');
-      this.elements.imageResultPanel.classList.add('hidden');
+      this.elements.resultPanel?.classList.remove('hidden');
+      this.elements.imageResultPanel?.classList.add('hidden');
 
       const video = this.elements.videoPlayer;
-      video.pause();
-      video.src = result.videoUrl;
-      video.load();
-      video.play().catch(() => {
-        video.muted = true;
-        video.play().catch(() => {});
-      });
+      if (video) {
+        video.pause();
+        video.src = result.videoUrl;
+        video.load();
+        video.play().catch(() => {
+          video.muted = true;
+          video.play().catch(() => {});
+        });
+      }
 
-      this.elements.metaResolution.textContent = '512 × 512';
-      this.elements.metaDuration.textContent = '~2.0s (Looped)';
-      this.elements.metaModel.textContent = result.params.baseModel;
+      if (this.elements.metaResolution) this.elements.metaResolution.textContent = '512 × 512';
+      if (this.elements.metaDuration) this.elements.metaDuration.textContent = '~2.0s (Looped)';
+      if (this.elements.metaModel) this.elements.metaModel.textContent = result.params.baseModel;
       const motionObj = CONFIG.MOTIONS.find(m => m.id === result.params.motion);
-      this.elements.metaMotion.textContent = motionObj ? motionObj.name : 'Natural';
-      this.elements.metaSteps.textContent = `${result.params.steps} Steps (HD)`;
-      this.elements.metaTime.textContent = `${result.totalElapsedSeconds}s`;
+      if (this.elements.metaMotion) this.elements.metaMotion.textContent = motionObj ? motionObj.name : 'Natural';
+      if (this.elements.metaSteps) this.elements.metaSteps.textContent = `${result.params.steps} Steps (HD)`;
+      if (this.elements.metaTime) this.elements.metaTime.textContent = `${result.totalElapsedSeconds}s`;
 
-      this.elements.resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      this.elements.resultPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       this.showToast('High-fidelity video synthesized successfully!', 'success');
 
     } else {
-      this.elements.btnGenerateImage.disabled = false;
-      this.elements.btnGenerateImage.classList.remove('loading');
-      this.elements.btnGenerateImageText.textContent = 'Generate Image';
+      if (this.elements.btnGenerateImage) {
+        this.elements.btnGenerateImage.disabled = false;
+        this.elements.btnGenerateImage.classList.remove('loading');
+      }
+      if (this.elements.btnGenerateImageText) this.elements.btnGenerateImageText.textContent = 'Generate HD Image';
 
-      this.elements.imageResultPanel.classList.remove('hidden');
-      this.elements.resultPanel.classList.add('hidden');
+      this.elements.imageResultPanel?.classList.remove('hidden');
+      this.elements.resultPanel?.classList.add('hidden');
 
-      this.elements.imagePreviewEl.src = result.blobUrl || result.imageUrl;
-      this.elements.imageMetaDimensions.textContent = `${result.width} × ${result.height}`;
-      this.elements.imageMetaModel.textContent = result.model.toUpperCase();
-      this.elements.imageMetaSeed.textContent = result.seed;
-      this.elements.imageMetaTime.textContent = `${result.totalElapsedSeconds}s`;
+      if (this.elements.imagePreviewEl) {
+        this.elements.imagePreviewEl.src = result.blobUrl || result.imageUrl;
+      }
+      if (this.elements.imageMetaDimensions) this.elements.imageMetaDimensions.textContent = `${result.width} × ${result.height}`;
+      if (this.elements.imageMetaModel) this.elements.imageMetaModel.textContent = result.model.toUpperCase();
+      if (this.elements.imageMetaSeed) this.elements.imageMetaSeed.textContent = result.seed;
+      if (this.elements.imageMetaTime) this.elements.imageMetaTime.textContent = `${result.totalElapsedSeconds}s`;
 
-      this.elements.imageResultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      this.elements.imageResultPanel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       this.showToast('High-resolution image rendered successfully!', 'success');
     }
   }
 
   showErrorState(errorMessage) {
     this.stopTimer();
-    this.elements.btnGenerateVideo.disabled = false;
-    this.elements.btnGenerateVideo.classList.remove('loading');
-    this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
+    if (this.elements.btnGenerateVideo) {
+      this.elements.btnGenerateVideo.disabled = false;
+      this.elements.btnGenerateVideo.classList.remove('loading');
+    }
+    if (this.elements.btnGenerateVideoText) this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
 
-    this.elements.btnGenerateImage.disabled = false;
-    this.elements.btnGenerateImage.classList.remove('loading');
-    this.elements.btnGenerateImageText.textContent = 'Generate Image';
+    if (this.elements.btnGenerateImage) {
+      this.elements.btnGenerateImage.disabled = false;
+      this.elements.btnGenerateImage.classList.remove('loading');
+    }
+    if (this.elements.btnGenerateImageText) this.elements.btnGenerateImageText.textContent = 'Generate HD Image';
 
-    this.elements.statusOrb.className = 'status-orb error';
-    this.elements.statusTitle.textContent = 'Generation Interrupted';
-    this.elements.statusSubtitle.textContent = errorMessage || 'The request could not be completed. Automatically switching clusters...';
-    this.elements.progressBar.style.width = '0%';
-    this.elements.progressPercent.textContent = '0%';
+    if (this.elements.statusOrb) this.elements.statusOrb.className = 'status-orb error';
+    if (this.elements.statusTitle) this.elements.statusTitle.textContent = 'Generation Interrupted';
+    if (this.elements.statusSubtitle) this.elements.statusSubtitle.textContent = errorMessage || 'The request could not be completed.';
+    if (this.elements.progressBar) this.elements.progressBar.style.width = '0%';
+    if (this.elements.progressPercent) this.elements.progressPercent.textContent = '0%';
     this.showToast(errorMessage || 'Generation error', 'error');
   }
 
   showCancelledState() {
     this.stopTimer();
-    this.elements.statusPanel.classList.add('hidden');
-    this.elements.btnGenerateVideo.disabled = false;
-    this.elements.btnGenerateVideo.classList.remove('loading');
-    this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
+    this.elements.statusPanel?.classList.add('hidden');
+    if (this.elements.btnGenerateVideo) {
+      this.elements.btnGenerateVideo.disabled = false;
+      this.elements.btnGenerateVideo.classList.remove('loading');
+    }
+    if (this.elements.btnGenerateVideoText) this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
 
-    this.elements.btnGenerateImage.disabled = false;
-    this.elements.btnGenerateImage.classList.remove('loading');
-    this.elements.btnGenerateImageText.textContent = 'Generate Image';
+    if (this.elements.btnGenerateImage) {
+      this.elements.btnGenerateImage.disabled = false;
+      this.elements.btnGenerateImage.classList.remove('loading');
+    }
+    if (this.elements.btnGenerateImageText) this.elements.btnGenerateImageText.textContent = 'Generate HD Image';
 
     this.showToast('Generation cancelled.', 'info');
   }
@@ -717,23 +796,23 @@ export class UIManager {
       setTimeout(() => { if (toast.parentElement) toast.parentElement.removeChild(toast); }, 300);
     };
 
-    toast.querySelector('.toast-close').addEventListener('click', dismiss);
+    toast.querySelector('.toast-close')?.addEventListener('click', dismiss);
     container.appendChild(toast);
     setTimeout(dismiss, duration);
   }
 
   getVideoFormData() {
-    const prompt = this.elements.videoPromptInput.value;
-    const selectedModel = this.elements.modelsContainer.querySelector('input[name="baseModel"]:checked')?.value || 'epiCRealism';
+    const prompt = this.elements.videoPromptInput?.value || '';
+    const selectedModel = this.elements.modelsContainer?.querySelector('input[name="baseModel"]:checked')?.value || 'epiCRealism';
     const motion = this.elements.motionSelect ? this.elements.motionSelect.value : '';
-    const steps = parseInt(this.elements.stepsContainer.querySelector('input[name="videoSteps"]:checked')?.value || '8', 10);
+    const steps = parseInt(this.elements.stepsContainer?.querySelector('input[name="videoSteps"]:checked')?.value || '8', 10);
     return { prompt, baseModel: selectedModel, motion, steps, autoEnhance: true };
   }
 
   getImageFormData() {
-    const prompt = this.elements.imagePromptInput.value;
-    const model = this.elements.imageModelsContainer.querySelector('input[name="imageModel"]:checked')?.value || 'flux';
-    const aspectRatio = this.elements.aspectRatiosContainer.querySelector('input[name="imageRatio"]:checked')?.value || '1:1';
+    const prompt = this.elements.imagePromptInput?.value || '';
+    const model = this.elements.imageModelsContainer?.querySelector('input[name="imageModel"]:checked')?.value || 'flux';
+    const aspectRatio = this.elements.aspectRatiosContainer?.querySelector('input[name="imageRatio"]:checked')?.value || '1:1';
     const styleId = this.elements.imageStylesContainer?.querySelector('.style-pill-btn.active')?.dataset.styleId || '';
     return { prompt, model, aspectRatio, styleId, enhance: true };
   }

@@ -1,6 +1,6 @@
 /**
- * Filza Motion AI - Main Application Entrypoint
- * Handles Video & Image generation, shortcuts, cluster heartbeat, and resilience.
+ * Filza Motion AI - Main Application Entrypoint (v1.3)
+ * Guarantees resilient boot, page swapping, and media generation.
  */
 
 import { CONFIG } from './config.js';
@@ -8,7 +8,7 @@ import { checkClusterHealth } from './inference-client.js';
 import { MediaGenerator, GENERATOR_STATE } from './generator.js';
 import { UIManager } from './ui.js';
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootApplication() {
   const ui = new UIManager();
   ui.init();
 
@@ -34,25 +34,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Handle Video Generation Request
+  // Video Generation trigger
   const handleVideoGenerate = async () => {
     generator.setMode('video');
     const formData = ui.getVideoFormData();
     try {
       await generator.startVideoGeneration(formData);
     } catch (err) {
-      console.warn('Video generation error caught:', err.message);
+      console.warn('Video generation notice:', err.message);
     }
   };
 
-  // Handle Image Generation Request
+  // Image Generation trigger
   const handleImageGenerate = async () => {
     generator.setMode('image');
     const formData = ui.getImageFormData();
     try {
       await generator.startImageGeneration(formData);
     } catch (err) {
-      console.warn('Image generation error caught:', err.message);
+      console.warn('Image generation notice:', err.message);
     }
   };
 
@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnGenImage.addEventListener('click', handleImageGenerate);
   }
 
-  // Keyboard shortcut: Ctrl+Enter / Cmd+Enter
+  // Keyboard shortcuts (Ctrl+Enter / Cmd+Enter)
   const vPrompt = document.getElementById('video-prompt-input');
   if (vPrompt) {
     vPrompt.addEventListener('keydown', (e) => {
@@ -96,25 +96,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Mobile menu toggle
-  const mobileToggle = document.getElementById('mobile-menu-btn');
-  const navLinks = document.getElementById('nav-links');
-  if (mobileToggle && navLinks) {
-    mobileToggle.addEventListener('click', () => {
-      navLinks.classList.toggle('nav-open');
-    });
-    navLinks.querySelectorAll('a').forEach(link => {
-      link.addEventListener('click', () => {
-        navLinks.classList.remove('nav-open');
-      });
-    });
-  }
+  // Listen to hash changes for smooth back/forward browser navigation
+  window.addEventListener('hashchange', () => {
+    if (window.location.hash === '#image') {
+      ui.switchPage('image', false);
+    } else if (window.location.hash === '#video') {
+      ui.switchPage('video', false);
+    }
+  });
 
-  // Smooth scroll
+  // Smooth scrolling for navigation links
   document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     anchor.addEventListener('click', function (e) {
       const targetId = this.getAttribute('href');
-      if (targetId === '#' || targetId === '') return;
+      if (targetId === '#' || targetId === '#video' || targetId === '#image') return;
       const targetEl = document.querySelector(targetId);
       if (targetEl) {
         e.preventDefault();
@@ -123,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Cluster health check
+  // Cluster health ping
   const runHealthCheck = async () => {
     const health = await checkClusterHealth(7000);
     ui.setClusterStatus(health);
@@ -132,5 +127,12 @@ document.addEventListener('DOMContentLoaded', () => {
   runHealthCheck();
   setInterval(runHealthCheck, 90000);
 
-  console.log(`${CONFIG.APP_NAME} v${CONFIG.APP_VERSION} initialized with Dual-Mode AI Studio.`);
-});
+  console.log(`${CONFIG.APP_NAME} v${CONFIG.APP_VERSION} initialized with Top Bar Switcher.`);
+}
+
+// Resilient Boot Sequence (Runs whether DOM is already parsed or loading)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApplication);
+} else {
+  bootApplication();
+}
