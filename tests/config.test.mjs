@@ -1,5 +1,5 @@
 /**
- * Automated tests for configuration module
+ * Automated tests for configuration module (v1.2)
  */
 
 import { CONFIG } from '../js/config.js';
@@ -17,38 +17,32 @@ function assert(condition, message) {
   }
 }
 
-console.log('--- Testing Config Module ---');
+console.log('--- Testing Config Module (Video & Image Studios) ---');
 
-// Test 1: Brand name contains Filza
+// Test 1: Brand name
 assert(CONFIG.APP_NAME.includes('Filza'), 'APP_NAME contains "Filza"');
 
-// Test 2: Valid API endpoints
-assert(CONFIG.API.BASE_URL.startsWith('https://'), 'API BASE_URL uses HTTPS');
-assert(CONFIG.API.JOIN_ENDPOINT === '/queue/join', 'API JOIN_ENDPOINT is /queue/join');
-assert(CONFIG.API.DATA_ENDPOINT === '/queue/data', 'API DATA_ENDPOINT is /queue/data');
+// Test 2: Multi-cluster failover pool
+assert(Array.isArray(CONFIG.VIDEO_CLUSTERS) && CONFIG.VIDEO_CLUSTERS.length >= 2, 'Has at least 2 video cluster failover nodes');
+assert(CONFIG.VIDEO_CLUSTERS.every(c => c.baseUrl.startsWith('https://')), 'All cluster nodes use HTTPS');
 
-// Test 3: Models definition
-assert(Array.isArray(CONFIG.MODELS) && CONFIG.MODELS.length >= 2, 'Has at least 2 base models');
+// Test 3: Video Models & Step Defaults
 assert(CONFIG.MODELS.some(m => m.id === 'epiCRealism'), 'Contains epiCRealism checkpoint');
-assert(CONFIG.MODELS.some(m => m.id === 'ToonYou'), 'Contains ToonYou checkpoint');
-assert(CONFIG.MODELS.filter(m => m.default).length === 1, 'Exactly one model marked default');
+assert(CONFIG.STEPS.some(s => s.value === 8 && s.default), 'Step 8 (Cinema HD) is default recommended');
 
 // Test 4: Camera motions
-assert(Array.isArray(CONFIG.MOTIONS) && CONFIG.MOTIONS.length >= 8, 'Has at least 8 camera motion LoRAs');
-assert(CONFIG.MOTIONS.some(m => m.id === ''), 'Has default empty motion');
-assert(CONFIG.MOTIONS.some(m => m.id.includes('zoom-in')), 'Has Zoom In motion');
-assert(CONFIG.MOTIONS.some(m => m.id.includes('zoom-out')), 'Has Zoom Out motion');
-assert(CONFIG.MOTIONS.some(m => m.id.includes('pan-left')), 'Has Pan Left motion');
+assert(CONFIG.MOTIONS.length >= 8, 'Has at least 8 camera motion LoRAs');
+assert(CONFIG.MOTIONS.some(m => m.id.includes('zoom-in') && m.default), 'Dynamic Zoom In is default motion');
 
-// Test 5: Steps definition
-assert(Array.isArray(CONFIG.STEPS) && CONFIG.STEPS.length >= 4, 'Has at least 4 step options');
-assert(CONFIG.STEPS.some(s => s.value === 4 && s.default), 'Step 4 is default recommended');
+// Test 5: Image Models & Aspect Ratios
+assert(Array.isArray(CONFIG.IMAGE_MODELS) && CONFIG.IMAGE_MODELS.length >= 2, 'Has multiple image models');
+assert(CONFIG.IMAGE_MODELS.some(m => m.id === 'flux'), 'Contains FLUX.1 model');
+assert(CONFIG.IMAGE_ASPECT_RATIOS.length >= 5, 'Supports 5 aspect ratios (1:1, 16:9, 9:16, 4:3, 21:9)');
+assert(CONFIG.IMAGE_STYLES.length >= 5, 'Supports 5+ artistic styles');
 
-// Test 6: Example prompts
-assert(Array.isArray(CONFIG.EXAMPLE_PROMPTS) && CONFIG.EXAMPLE_PROMPTS.length >= 4, 'Has at least 4 example prompts');
-for (const ex of CONFIG.EXAMPLE_PROMPTS) {
-  assert(ex.title && ex.prompt && ex.category, `Example prompt "${ex.title}" is well-formed`);
-}
+// Test 6: Quality Enhancers
+assert(typeof CONFIG.QUALITY_ENHANCERS.VIDEO_POSITIVE === 'string', 'Has video quality enhancer keywords');
+assert(typeof CONFIG.QUALITY_ENHANCERS.VIDEO_NEGATIVE === 'string', 'Has negative prompt defaults');
 
 console.log(`Config Tests completed: ${passed} passed, ${failed} failed.\n`);
 if (failed > 0) process.exit(1);

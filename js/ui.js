@@ -1,50 +1,67 @@
 /**
  * Filza Motion AI - User Interface & Interaction Module
+ * Manages Video Studio, Image Studio, Custom Players, Gallery, and Toasts.
  */
 
 import { CONFIG } from './config.js';
-import { validatePrompt } from './validation.js';
-import { downloadVideoBlob } from './inference-client.js';
+import { validatePrompt, enhancePrompt } from './validation.js';
+import { downloadMediaBlob } from './inference-client.js';
 
 export class UIManager {
   constructor() {
+    this.currentTab = 'video'; // 'video' | 'image'
     this.timerInterval = null;
     this.startTime = null;
     this.elements = {};
   }
 
-  /**
-   * Initializes DOM references and event listeners.
-   */
   init() {
     this._cacheElements();
-    this._renderModelOptions();
-    this._renderMotionOptions();
-    this._renderStepOptions();
-    this._renderExampleGallery();
+    this._renderVideoControls();
+    this._renderImageControls();
+    this._renderGallery();
     this._setupInputListeners();
     this._setupVideoPlayerControls();
+    this._setupImageActions();
+    this._setupTabs();
   }
 
   _cacheElements() {
     this.elements = {
-      // Navbar / Header
+      // Tabs
+      tabVideoBtn: document.getElementById('tab-video-btn'),
+      tabImageBtn: document.getElementById('tab-image-btn'),
+      videoStudioForm: document.getElementById('video-studio-form'),
+      imageStudioForm: document.getElementById('image-studio-form'),
+
+      // Cluster status
       clusterStatusBadge: document.getElementById('cluster-status-badge'),
       clusterStatusText: document.getElementById('cluster-status-text'),
       clusterDot: document.getElementById('cluster-dot'),
 
-      // Prompt & Inputs
-      promptInput: document.getElementById('prompt-input'),
-      charCounter: document.getElementById('char-counter'),
-      promptFeedback: document.getElementById('prompt-feedback'),
+      // Video Form Elements
+      videoPromptInput: document.getElementById('video-prompt-input'),
+      videoCharCounter: document.getElementById('video-char-counter'),
+      videoPromptFeedback: document.getElementById('video-prompt-feedback'),
+      btnMagicEnhanceVideo: document.getElementById('btn-magic-enhance-video'),
       modelsContainer: document.getElementById('models-container'),
       motionSelect: document.getElementById('motion-select'),
       stepsContainer: document.getElementById('steps-container'),
-      btnGenerate: document.getElementById('btn-generate'),
-      btnGenerateText: document.getElementById('btn-generate-text'),
-      btnGenerateIcon: document.getElementById('btn-generate-icon'),
+      btnGenerateVideo: document.getElementById('btn-generate-video'),
+      btnGenerateVideoText: document.getElementById('btn-generate-video-text'),
 
-      // Status & Progress Box
+      // Image Form Elements
+      imagePromptInput: document.getElementById('image-prompt-input'),
+      imageCharCounter: document.getElementById('image-char-counter'),
+      imagePromptFeedback: document.getElementById('image-prompt-feedback'),
+      btnMagicEnhanceImage: document.getElementById('btn-magic-enhance-image'),
+      imageModelsContainer: document.getElementById('image-models-container'),
+      aspectRatiosContainer: document.getElementById('aspect-ratios-container'),
+      imageStylesContainer: document.getElementById('image-styles-container'),
+      btnGenerateImage: document.getElementById('btn-generate-image'),
+      btnGenerateImageText: document.getElementById('btn-generate-image-text'),
+
+      // Status Monitor
       statusPanel: document.getElementById('status-panel'),
       statusOrb: document.getElementById('status-orb'),
       statusTitle: document.getElementById('status-title'),
@@ -59,8 +76,6 @@ export class UIManager {
       // Video Result
       resultPanel: document.getElementById('result-panel'),
       videoPlayer: document.getElementById('video-player'),
-      videoSource: document.getElementById('video-source'),
-      videoPlaceholder: document.getElementById('video-placeholder'),
       metaResolution: document.getElementById('meta-resolution'),
       metaDuration: document.getElementById('meta-duration'),
       metaModel: document.getElementById('meta-model'),
@@ -68,11 +83,11 @@ export class UIManager {
       metaSteps: document.getElementById('meta-steps'),
       metaTime: document.getElementById('meta-time'),
       btnDownloadMp4: document.getElementById('btn-download-mp4'),
-      btnCopyLink: document.getElementById('btn-copy-link'),
-      btnGenerateAnother: document.getElementById('btn-generate-another'),
-      btnRefinePrompt: document.getElementById('btn-refine-prompt'),
+      btnCopyVideoLink: document.getElementById('btn-copy-video-link'),
+      btnRefineVideoPrompt: document.getElementById('btn-refine-video-prompt'),
+      btnGenerateAnotherVideo: document.getElementById('btn-generate-another-video'),
 
-      // Custom Video Controls
+      // Video Custom Controls
       btnPlayPause: document.getElementById('btn-play-pause'),
       btnPlayPauseIcon: document.getElementById('btn-play-pause-icon'),
       btnMute: document.getElementById('btn-mute'),
@@ -83,75 +98,166 @@ export class UIManager {
       videoSeekbar: document.getElementById('video-seekbar'),
       speedSelect: document.getElementById('speed-select'),
 
-      // Gallery & Modals
+      // Image Result
+      imageResultPanel: document.getElementById('image-result-panel'),
+      imagePreviewEl: document.getElementById('image-preview-el'),
+      imageMetaDimensions: document.getElementById('image-meta-dimensions'),
+      imageMetaModel: document.getElementById('image-meta-model'),
+      imageMetaSeed: document.getElementById('image-meta-seed'),
+      imageMetaTime: document.getElementById('image-meta-time'),
+      btnDownloadImage: document.getElementById('btn-download-image'),
+      btnCopyImageLink: document.getElementById('btn-copy-image-link'),
+      btnGenerateAnotherImage: document.getElementById('btn-generate-another-image'),
+
+      // Gallery & Toast
       galleryGrid: document.getElementById('gallery-grid'),
       toastContainer: document.getElementById('toast-container')
     };
   }
 
-  _renderModelOptions() {
+  _setupTabs() {
+    const { tabVideoBtn, tabImageBtn, videoStudioForm, imageStudioForm } = this.elements;
+
+    tabVideoBtn.addEventListener('click', () => {
+      this.currentTab = 'video';
+      tabVideoBtn.classList.add('active');
+      tabImageBtn.classList.remove('active');
+      videoStudioForm.classList.remove('hidden');
+      imageStudioForm.classList.add('hidden');
+    });
+
+    tabImageBtn.addEventListener('click', () => {
+      this.currentTab = 'image';
+      tabImageBtn.classList.add('active');
+      tabVideoBtn.classList.remove('active');
+      imageStudioForm.classList.remove('hidden');
+      videoStudioForm.classList.add('hidden');
+    });
+  }
+
+  _renderVideoControls() {
+    // Render video models
     const container = this.elements.modelsContainer;
-    if (!container) return;
-    container.innerHTML = '';
-
-    CONFIG.MODELS.forEach((model) => {
-      const label = document.createElement('label');
-      label.className = `model-radio-card ${model.default ? 'active' : ''}`;
-      label.innerHTML = `
-        <input type="radio" name="baseModel" value="${model.id}" ${model.default ? 'checked' : ''} class="sr-only">
-        <div class="card-header">
-          <span class="card-name">${model.name}</span>
-          <span class="badge ${model.id === 'epiCRealism' ? 'badge-violet' : 'badge-cyan'}">${model.badge}</span>
-        </div>
-        <p class="card-desc">${model.description}</p>
-      `;
-
-      label.querySelector('input').addEventListener('change', () => {
-        container.querySelectorAll('.model-radio-card').forEach(el => el.classList.remove('active'));
-        label.classList.add('active');
+    if (container) {
+      container.innerHTML = '';
+      CONFIG.MODELS.forEach((m) => {
+        const label = document.createElement('label');
+        label.className = `model-radio-card ${m.default ? 'active' : ''}`;
+        label.innerHTML = `
+          <input type="radio" name="baseModel" value="${m.id}" ${m.default ? 'checked' : ''} class="sr-only">
+          <div class="card-header">
+            <span class="card-name">${m.name}</span>
+            <span class="badge ${m.id === 'epiCRealism' ? 'badge-violet' : 'badge-cyan'}">${m.badge}</span>
+          </div>
+          <p class="card-desc">${m.description}</p>
+        `;
+        label.querySelector('input').addEventListener('change', () => {
+          container.querySelectorAll('.model-radio-card').forEach(el => el.classList.remove('active'));
+          label.classList.add('active');
+        });
+        container.appendChild(label);
       });
+    }
 
-      container.appendChild(label);
-    });
-  }
-
-  _renderMotionOptions() {
+    // Render motion options
     const select = this.elements.motionSelect;
-    if (!select) return;
-    select.innerHTML = '';
-
-    CONFIG.MOTIONS.forEach((motion) => {
-      const opt = document.createElement('option');
-      opt.value = motion.id;
-      opt.textContent = `${motion.icon} ${motion.name} — ${motion.description}`;
-      select.appendChild(opt);
-    });
-  }
-
-  _renderStepOptions() {
-    const container = this.elements.stepsContainer;
-    if (!container) return;
-    container.innerHTML = '';
-
-    CONFIG.STEPS.forEach((step) => {
-      const label = document.createElement('label');
-      label.className = `step-radio-pill ${step.default ? 'active' : ''}`;
-      label.innerHTML = `
-        <input type="radio" name="steps" value="${step.value}" ${step.default ? 'checked' : ''} class="sr-only">
-        <div class="pill-title">${step.name}</div>
-        <div class="pill-meta">${step.approxTime} · <span class="pill-badge">${step.badge}</span></div>
-      `;
-
-      label.querySelector('input').addEventListener('change', () => {
-        container.querySelectorAll('.step-radio-pill').forEach(el => el.classList.remove('active'));
-        label.classList.add('active');
+    if (select) {
+      select.innerHTML = '';
+      CONFIG.MOTIONS.forEach((motion) => {
+        const opt = document.createElement('option');
+        opt.value = motion.id;
+        opt.textContent = `${motion.icon} ${motion.name} — ${motion.description}`;
+        if (motion.default) opt.selected = true;
+        select.appendChild(opt);
       });
+    }
 
-      container.appendChild(label);
-    });
+    // Render steps
+    const stepsContainer = this.elements.stepsContainer;
+    if (stepsContainer) {
+      stepsContainer.innerHTML = '';
+      CONFIG.STEPS.forEach((step) => {
+        const label = document.createElement('label');
+        label.className = `step-radio-pill ${step.default ? 'active' : ''}`;
+        label.innerHTML = `
+          <input type="radio" name="videoSteps" value="${step.value}" ${step.default ? 'checked' : ''} class="sr-only">
+          <div class="pill-title">${step.name}</div>
+          <div class="pill-meta">${step.approxTime} · <span class="pill-badge">${step.badge}</span></div>
+        `;
+        label.querySelector('input').addEventListener('change', () => {
+          stepsContainer.querySelectorAll('.step-radio-pill').forEach(el => el.classList.remove('active'));
+          label.classList.add('active');
+        });
+        stepsContainer.appendChild(label);
+      });
+    }
   }
 
-  _renderExampleGallery() {
+  _renderImageControls() {
+    // Render Aspect Ratios
+    const ratioContainer = this.elements.aspectRatiosContainer;
+    if (ratioContainer) {
+      ratioContainer.innerHTML = '';
+      CONFIG.IMAGE_ASPECT_RATIOS.forEach((r) => {
+        const label = document.createElement('label');
+        label.className = `aspect-ratio-card ${r.default ? 'active' : ''}`;
+        label.innerHTML = `
+          <input type="radio" name="imageRatio" value="${r.id}" ${r.default ? 'checked' : ''} class="sr-only">
+          <div class="ratio-icon">${r.icon}</div>
+          <div class="ratio-title">${r.name}</div>
+          <div class="ratio-dim">${r.width}×${r.height}</div>
+        `;
+        label.querySelector('input').addEventListener('change', () => {
+          ratioContainer.querySelectorAll('.aspect-ratio-card').forEach(el => el.classList.remove('active'));
+          label.classList.add('active');
+        });
+        ratioContainer.appendChild(label);
+      });
+    }
+
+    // Render Image Models
+    const modelContainer = this.elements.imageModelsContainer;
+    if (modelContainer) {
+      modelContainer.innerHTML = '';
+      CONFIG.IMAGE_MODELS.forEach((m) => {
+        const label = document.createElement('label');
+        label.className = `model-radio-card ${m.default ? 'active' : ''}`;
+        label.innerHTML = `
+          <input type="radio" name="imageModel" value="${m.id}" ${m.default ? 'checked' : ''} class="sr-only">
+          <div class="card-header">
+            <span class="card-name">${m.name}</span>
+            <span class="badge badge-cyan">${m.badge}</span>
+          </div>
+          <p class="card-desc">${m.description}</p>
+        `;
+        label.querySelector('input').addEventListener('change', () => {
+          modelContainer.querySelectorAll('.model-radio-card').forEach(el => el.classList.remove('active'));
+          label.classList.add('active');
+        });
+        modelContainer.appendChild(label);
+      });
+    }
+
+    // Render Image Styles
+    const styleContainer = this.elements.imageStylesContainer;
+    if (styleContainer) {
+      styleContainer.innerHTML = '';
+      CONFIG.IMAGE_STYLES.forEach((s, idx) => {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = `style-pill-btn ${idx === 0 ? 'active' : ''}`;
+        pill.dataset.styleId = s.id;
+        pill.innerHTML = `<span>${s.icon}</span> ${s.name}`;
+        pill.addEventListener('click', () => {
+          styleContainer.querySelectorAll('.style-pill-btn').forEach(b => b.classList.remove('active'));
+          pill.classList.add('active');
+        });
+        styleContainer.appendChild(pill);
+      });
+    }
+  }
+
+  _renderGallery() {
     const grid = this.elements.galleryGrid;
     if (!grid) return;
     grid.innerHTML = '';
@@ -159,26 +265,32 @@ export class UIManager {
     CONFIG.EXAMPLE_PROMPTS.forEach((item) => {
       const card = document.createElement('div');
       card.className = 'example-card';
-      const motionObj = CONFIG.MOTIONS.find(m => m.id === item.motion) || { name: 'Natural Motion', icon: '🌊' };
+      const isVideo = item.type === 'video';
 
       card.innerHTML = `
         <div class="example-card-header">
           <span class="example-tag">${item.tag}</span>
-          <span class="example-category">${item.category}</span>
+          <span class="example-category">${isVideo ? '🎬 Video' : '🎨 Image'} · ${item.category}</span>
         </div>
         <h4 class="example-card-title">${item.title}</h4>
         <p class="example-card-prompt">"${item.prompt}"</p>
         <div class="example-card-footer">
-          <div class="example-motion-chip">${motionObj.icon} ${motionObj.name}</div>
+          <div class="example-motion-chip">${isVideo ? 'AnimateDiff HD' : 'FLUX.1 Schnell'}</div>
           <button type="button" class="btn-use-prompt" aria-label="Use prompt: ${item.title}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-            Try Prompt
+            Try ${isVideo ? 'Video' : 'Image'}
           </button>
         </div>
       `;
 
       card.querySelector('.btn-use-prompt').addEventListener('click', () => {
-        this.loadPromptIntoForm(item);
+        if (isVideo) {
+          this.elements.tabVideoBtn.click();
+          this.loadVideoPrompt(item);
+        } else {
+          this.elements.tabImageBtn.click();
+          this.loadImagePrompt(item);
+        }
       });
 
       grid.appendChild(card);
@@ -186,47 +298,64 @@ export class UIManager {
   }
 
   _setupInputListeners() {
-    const input = this.elements.promptInput;
-    if (!input) return;
+    // Video prompt counter & Magic Enhance
+    const vInput = this.elements.videoPromptInput;
+    if (vInput) {
+      const updateVCounter = () => {
+        const res = validatePrompt(vInput.value);
+        this.elements.videoCharCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
+        if (res.warning) {
+          this.elements.videoPromptFeedback.textContent = res.warning;
+          this.elements.videoPromptFeedback.className = 'prompt-feedback warning';
+        } else {
+          this.elements.videoPromptFeedback.textContent = '';
+          this.elements.videoPromptFeedback.className = 'prompt-feedback';
+        }
+      };
+      vInput.addEventListener('input', updateVCounter);
+      updateVCounter();
 
-    const updateCounter = () => {
-      const res = validatePrompt(input.value);
-      this.elements.charCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
-      
-      if (res.charCount > CONFIG.LIMITS.MAX_PROMPT_LENGTH) {
-        this.elements.charCounter.classList.add('limit-exceeded');
-      } else {
-        this.elements.charCounter.classList.remove('limit-exceeded');
-      }
+      this.elements.btnMagicEnhanceVideo.addEventListener('click', () => {
+        const enhanced = enhancePrompt(vInput.value, 'video');
+        if (enhanced) {
+          vInput.value = enhanced;
+          updateVCounter();
+          this.showToast('🪄 Prompt enhanced with 8K cinematic lighting and motion cues!', 'success');
+        }
+      });
+    }
 
-      if (res.warning) {
-        this.elements.promptFeedback.textContent = res.warning;
-        this.elements.promptFeedback.className = 'prompt-feedback warning';
-      } else if (res.error && res.charCount > 0) {
-        this.elements.promptFeedback.textContent = res.error;
-        this.elements.promptFeedback.className = 'prompt-feedback error';
-      } else {
-        this.elements.promptFeedback.textContent = '';
-        this.elements.promptFeedback.className = 'prompt-feedback';
-      }
-    };
+    // Image prompt counter & Magic Enhance
+    const iInput = this.elements.imagePromptInput;
+    if (iInput) {
+      const updateICounter = () => {
+        const res = validatePrompt(iInput.value);
+        this.elements.imageCharCounter.textContent = `${res.charCount} / ${CONFIG.LIMITS.MAX_PROMPT_LENGTH}`;
+      };
+      iInput.addEventListener('input', updateICounter);
+      updateICounter();
 
-    input.addEventListener('input', updateCounter);
-    updateCounter();
+      this.elements.btnMagicEnhanceImage.addEventListener('click', () => {
+        const activeStyle = this.elements.imageStylesContainer?.querySelector('.style-pill-btn.active')?.dataset.styleId || '';
+        const enhanced = enhancePrompt(iInput.value, 'image', activeStyle);
+        if (enhanced) {
+          iInput.value = enhanced;
+          updateICounter();
+          this.showToast('🪄 Prompt enhanced with professional composition details!', 'success');
+        }
+      });
+    }
 
-    // Quick tag pills above prompt
+    // Quick tag pills for video
     document.querySelectorAll('.quick-tag-pill').forEach(pill => {
       pill.addEventListener('click', () => {
-        const text = pill.getAttribute('data-tag');
-        if (!text) return;
-        const current = input.value.trim();
-        if (current) {
-          input.value = `${current}, ${text}`;
-        } else {
-          input.value = text;
-        }
-        updateCounter();
-        input.focus();
+        const tag = pill.getAttribute('data-tag');
+        const activeInput = this.currentTab === 'video' ? this.elements.videoPromptInput : this.elements.imagePromptInput;
+        if (!activeInput || !tag) return;
+        const cur = activeInput.value.trim();
+        activeInput.value = cur ? `${cur}, ${tag}` : tag;
+        activeInput.dispatchEvent(new Event('input'));
+        activeInput.focus();
       });
     });
   }
@@ -235,7 +364,6 @@ export class UIManager {
     const video = this.elements.videoPlayer;
     if (!video) return;
 
-    // Play/Pause
     const togglePlay = () => {
       if (video.paused || video.ended) {
         video.play();
@@ -249,163 +377,147 @@ export class UIManager {
     this.elements.btnPlayPause.addEventListener('click', togglePlay);
     video.addEventListener('click', togglePlay);
 
-    video.addEventListener('play', () => {
-      this.elements.btnPlayPauseIcon.innerHTML = `<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>`;
-    });
-    video.addEventListener('pause', () => {
-      this.elements.btnPlayPauseIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"/>`;
-    });
-
-    // Mute/Unmute
+    // Mute
     this.elements.btnMute.addEventListener('click', () => {
       video.muted = !video.muted;
-      if (video.muted) {
-        this.elements.btnMuteIcon.innerHTML = `<path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>`;
-      } else {
-        this.elements.btnMuteIcon.innerHTML = `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>`;
-      }
+      this.elements.btnMuteIcon.innerHTML = video.muted
+        ? `<path d="M11 5L6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/>`
+        : `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>`;
     });
 
     // Fullscreen
     this.elements.btnFullscreen.addEventListener('click', () => {
+      const container = video.closest('.video-player-container');
       if (!document.fullscreenElement) {
-        const container = video.closest('.video-player-container');
         if (container?.requestFullscreen) container.requestFullscreen();
       } else {
         if (document.exitFullscreen) document.exitFullscreen();
       }
     });
 
-    // Loop toggle
+    // Loop
     this.elements.btnLoop.addEventListener('click', () => {
       video.loop = !video.loop;
       this.elements.btnLoop.classList.toggle('active', video.loop);
-      this.showToast(video.loop ? 'Video looping enabled' : 'Video looping disabled', 'info');
+      this.showToast(video.loop ? 'Looping enabled' : 'Looping disabled', 'info');
     });
 
-    // Playback Speed
+    // Speed
     this.elements.speedSelect.addEventListener('change', (e) => {
       video.playbackRate = parseFloat(e.target.value);
     });
 
-    // Time update & seekbar
+    // Seek
     video.addEventListener('timeupdate', () => {
       const cur = video.currentTime || 0;
       const dur = video.duration || 1;
-      const pct = (cur / dur) * 100;
-      this.elements.videoSeekbar.value = isNaN(pct) ? 0 : pct;
-
-      const formatTime = (t) => {
-        const m = Math.floor(t / 60);
-        const s = Math.floor(t % 60);
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-      };
-      this.elements.videoTimeDisplay.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+      this.elements.videoSeekbar.value = isNaN(cur / dur) ? 0 : (cur / dur) * 100;
+      const fmt = (t) => `${Math.floor(t / 60)}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
+      this.elements.videoTimeDisplay.textContent = `${fmt(cur)} / ${fmt(dur)}`;
     });
 
     this.elements.videoSeekbar.addEventListener('input', (e) => {
-      const pct = parseFloat(e.target.value);
       const dur = video.duration || 1;
-      video.currentTime = (pct / 100) * dur;
+      video.currentTime = (parseFloat(e.target.value) / 100) * dur;
     });
 
-    // Copy Video Link
-    this.elements.btnCopyLink.addEventListener('click', async () => {
-      const src = this.elements.videoPlayer.src;
-      if (!src) return;
+    // Copy Link
+    this.elements.btnCopyVideoLink.addEventListener('click', async () => {
+      if (!video.src) return;
       try {
-        await navigator.clipboard.writeText(src);
-        this.showToast('Direct video URL copied to clipboard!', 'success');
+        await navigator.clipboard.writeText(video.src);
+        this.showToast('Video URL copied to clipboard!', 'success');
       } catch (_) {
-        this.showToast('Copied URL: ' + src, 'info');
+        this.showToast('Copied: ' + video.src, 'info');
       }
     });
 
     // Download MP4
     this.elements.btnDownloadMp4.addEventListener('click', async () => {
-      const src = this.elements.videoPlayer.src;
+      if (!video.src) return;
+      const btn = this.elements.btnDownloadMp4;
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-sm"></span> Downloading MP4...`;
+      await downloadMediaBlob(video.src, `filza-motion-${Date.now()}.mp4`);
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      this.showToast('MP4 download initiated!', 'success');
+    });
+
+    this.elements.btnRefineVideoPrompt.addEventListener('click', () => {
+      document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
+      this.elements.videoPromptInput.focus();
+    });
+
+    this.elements.btnGenerateAnotherVideo.addEventListener('click', () => {
+      document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
+      this.elements.videoPromptInput.value = '';
+      this.elements.videoPromptInput.dispatchEvent(new Event('input'));
+      this.elements.videoPromptInput.focus();
+    });
+  }
+
+  _setupImageActions() {
+    // Download Image
+    this.elements.btnDownloadImage.addEventListener('click', async () => {
+      const src = this.elements.imagePreviewEl.src;
       if (!src) return;
+      const btn = this.elements.btnDownloadImage;
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-sm"></span> Downloading...`;
+      await downloadMediaBlob(src, `filza-image-${Date.now()}.jpg`);
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      this.showToast('Image downloaded successfully!', 'success');
+    });
 
-      const origText = this.elements.btnDownloadMp4.innerHTML;
-      this.elements.btnDownloadMp4.disabled = true;
-      this.elements.btnDownloadMp4.innerHTML = `
-        <span class="spinner-sm"></span> Preparing MP4...
-      `;
-
-      const filename = `filza-motion-${Date.now()}.mp4`;
-      const ok = await downloadVideoBlob(src, filename);
-      if (ok) {
-        this.showToast('Download initiated successfully!', 'success');
-      } else {
-        this.showToast('Failed to download video file directly.', 'error');
+    // Copy Image Link
+    this.elements.btnCopyImageLink.addEventListener('click', async () => {
+      const src = this.elements.imagePreviewEl.src;
+      if (!src) return;
+      try {
+        await navigator.clipboard.writeText(src);
+        this.showToast('Image URL copied to clipboard!', 'success');
+      } catch (_) {
+        this.showToast('Copied: ' + src, 'info');
       }
-
-      this.elements.btnDownloadMp4.disabled = false;
-      this.elements.btnDownloadMp4.innerHTML = origText;
     });
 
-    // Refine Prompt / Generate Another
-    this.elements.btnRefinePrompt.addEventListener('click', () => {
-      const panel = document.getElementById('generation-section');
-      if (panel) panel.scrollIntoView({ behavior: 'smooth' });
-      this.elements.promptInput.focus();
-    });
-
-    this.elements.btnGenerateAnother.addEventListener('click', () => {
-      const panel = document.getElementById('generation-section');
-      if (panel) panel.scrollIntoView({ behavior: 'smooth' });
-      this.elements.promptInput.value = '';
-      this.elements.promptInput.dispatchEvent(new Event('input'));
-      this.elements.promptInput.focus();
+    this.elements.btnGenerateAnotherImage.addEventListener('click', () => {
+      document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
+      this.elements.imagePromptInput.value = '';
+      this.elements.imagePromptInput.dispatchEvent(new Event('input'));
+      this.elements.imagePromptInput.focus();
     });
   }
 
-  /**
-   * Pre-fills the form with an example prompt configuration.
-   */
-  loadPromptIntoForm(example) {
-    if (!example) return;
-
-    this.elements.promptInput.value = example.prompt;
-    this.elements.promptInput.dispatchEvent(new Event('input'));
-
-    // Select Model
-    const modelInput = this.elements.modelsContainer.querySelector(`input[value="${example.model}"]`);
-    if (modelInput) {
-      modelInput.checked = true;
-      modelInput.dispatchEvent(new Event('change'));
-    }
-
-    // Select Motion
-    if (this.elements.motionSelect) {
-      this.elements.motionSelect.value = example.motion || '';
-    }
-
-    // Select Steps
-    const stepInput = this.elements.stepsContainer.querySelector(`input[value="${example.steps}"]`);
-    if (stepInput) {
-      stepInput.checked = true;
-      stepInput.dispatchEvent(new Event('change'));
-    }
-
-    // Scroll to prompt panel
-    const genSection = document.getElementById('generation-section');
-    if (genSection) {
-      genSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    this.elements.promptInput.focus();
-    this.showToast(`Loaded example "${example.title}" into studio.`, 'info');
+  loadVideoPrompt(example) {
+    this.elements.videoPromptInput.value = example.prompt;
+    this.elements.videoPromptInput.dispatchEvent(new Event('input'));
+    if (this.elements.motionSelect) this.elements.motionSelect.value = example.motion || '';
+    document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
+    this.showToast(`Loaded video preset "${example.title}" into studio.`, 'info');
   }
 
-  /**
-   * Updates cluster connectivity indicator badge.
-   */
+  loadImagePrompt(example) {
+    this.elements.imagePromptInput.value = example.prompt;
+    this.elements.imagePromptInput.dispatchEvent(new Event('input'));
+    const ratioRadio = this.elements.aspectRatiosContainer?.querySelector(`input[value="${example.aspectRatio}"]`);
+    if (ratioRadio) {
+      ratioRadio.checked = true;
+      ratioRadio.dispatchEvent(new Event('change'));
+    }
+    document.getElementById('generation-section')?.scrollIntoView({ behavior: 'smooth' });
+    this.showToast(`Loaded image preset "${example.title}" into studio.`, 'info');
+  }
+
   setClusterStatus(status) {
     const { isOnline, latencyMs, error } = status;
     const badge = this.elements.clusterStatusBadge;
     const text = this.elements.clusterStatusText;
     const dot = this.elements.clusterDot;
-
     if (!badge || !text || !dot) return;
 
     if (isOnline) {
@@ -414,26 +526,22 @@ export class UIManager {
       dot.className = 'pulse-dot green';
     } else {
       badge.className = 'status-pill warning';
-      text.textContent = `Cluster: Connecting / Waking (${error || 'Checking'})`;
+      text.textContent = `Cluster: Connecting / Standby (${error || 'Rechecking'})`;
       dot.className = 'pulse-dot yellow';
     }
   }
 
-  /**
-   * Starts the elapsed generation stopwatch timer.
-   */
   startTimer() {
     this.stopTimer();
     this.startTime = performance.now();
     this.elements.elapsedTimer.textContent = '00:00.0';
-
     this.timerInterval = setInterval(() => {
       const elapsed = performance.now() - this.startTime;
       const totalSec = Math.floor(elapsed / 1000);
       const dec = Math.floor((elapsed % 1000) / 100);
       const min = Math.floor(totalSec / 60);
       const sec = totalSec % 60;
-      this.elements.elapsedTimer.textContent = `${min < 10 ? '0' : ''}${min}:${sec < 10 ? '0' : ''}${sec}.${dec}`;
+      this.elements.elapsedTimer.textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${dec}`;
     }, 100);
   }
 
@@ -444,152 +552,155 @@ export class UIManager {
     }
   }
 
-  /**
-   * UI transitions when job is queued.
-   */
   showQueuedState() {
     this.startTimer();
     this.elements.statusPanel.classList.remove('hidden');
     this.elements.resultPanel.classList.add('hidden');
-    
-    this.elements.btnGenerate.disabled = true;
-    this.elements.btnGenerate.classList.add('loading');
-    this.elements.btnGenerateText.textContent = 'Allocating GPU Queue...';
+    this.elements.imageResultPanel.classList.add('hidden');
+
+    this.elements.btnGenerateVideo.disabled = true;
+    this.elements.btnGenerateVideo.classList.add('loading');
+    this.elements.btnGenerateVideoText.textContent = 'Allocating GPU Queue...';
 
     this.elements.statusOrb.className = 'status-orb queued';
-    this.elements.statusTitle.textContent = 'Waiting in GPU Dispatch Queue';
+    this.elements.statusTitle.textContent = 'GPU Cluster Dispatch';
     this.elements.statusSubtitle.textContent = 'Connecting to ZeroGPU dynamic resource scheduler...';
-    
-    this.elements.progressBar.style.width = '10%';
-    this.elements.progressPercent.textContent = '10%';
-    this.elements.progressStepInfo.textContent = 'Handshaking with ByteDance cluster';
+    this.elements.progressBar.style.width = '15%';
+    this.elements.progressPercent.textContent = '15%';
+    this.elements.progressStepInfo.textContent = 'Allocating lightning tensor cores';
     this.elements.queueRankBadge.textContent = 'Queue: Connecting';
-    this.elements.queueRankBadge.className = 'queue-badge';
-
     this.elements.statusPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  /**
-   * UI updates when queue rank updates.
-   */
   updateQueueRank({ rank, queueSize, etaSeconds }) {
     this.elements.queueRankBadge.textContent = `Queue Position: #${rank + 1} of ${queueSize}`;
-    this.elements.queueRankBadge.className = 'queue-badge active';
-    
-    if (etaSeconds !== null && etaSeconds > 0) {
-      const roundedEta = Math.round(etaSeconds);
-      this.elements.statusSubtitle.textContent = `Estimated wait: ~${roundedEta}s before diffusion starts.`;
+    if (etaSeconds) {
+      this.elements.statusSubtitle.textContent = `Estimated wait: ~${Math.round(etaSeconds)}s before diffusion starts.`;
     }
   }
 
-  /**
-   * UI transitions when synthesis begins.
-   */
-  showProcessingState() {
-    this.elements.btnGenerateText.textContent = 'Denoising Latents...';
-    this.elements.statusOrb.className = 'status-orb processing';
-    this.elements.statusTitle.textContent = 'Synthesizing Video Frames';
-    this.elements.statusSubtitle.textContent = 'AnimateDiff-Lightning neural network is generating motion coherence.';
-    this.elements.queueRankBadge.textContent = 'GPU Active (Processing)';
-    this.elements.queueRankBadge.className = 'queue-badge processing';
+  showProcessingState(mode = 'video') {
+    if (mode === 'video') {
+      this.elements.btnGenerateVideoText.textContent = 'Denoising Latents...';
+      this.elements.statusOrb.className = 'status-orb processing';
+      this.elements.statusTitle.textContent = 'Synthesizing Cinema Video';
+      this.elements.statusSubtitle.textContent = 'Generating multi-frame motion coherence with AnimateDiff HD.';
+      this.elements.queueRankBadge.textContent = 'GPU Active (Processing)';
+    } else {
+      this.startTimer();
+      this.elements.statusPanel.classList.remove('hidden');
+      this.elements.imageResultPanel.classList.add('hidden');
+      this.elements.resultPanel.classList.add('hidden');
+
+      this.elements.btnGenerateImage.disabled = true;
+      this.elements.btnGenerateImage.classList.add('loading');
+      this.elements.btnGenerateImageText.textContent = 'Rendering FLUX.1 Image...';
+
+      this.elements.statusOrb.className = 'status-orb processing';
+      this.elements.statusTitle.textContent = 'Synthesizing High-Res Image';
+      this.elements.statusSubtitle.textContent = 'FLUX.1 12B transformer is generating pixels...';
+      this.elements.progressBar.style.width = '60%';
+      this.elements.progressPercent.textContent = '60%';
+      this.elements.progressStepInfo.textContent = 'Neural latent decoding';
+      this.elements.queueRankBadge.textContent = 'Rendering';
+    }
   }
 
-  /**
-   * Updates real-time step progress.
-   */
   updateProgress({ step, totalSteps, percent }) {
     this.elements.progressBar.style.width = `${percent}%`;
     this.elements.progressPercent.textContent = `${percent}%`;
     this.elements.progressStepInfo.textContent = `Diffusion Step ${step} of ${totalSteps} (${percent}%)`;
   }
 
-  /**
-   * Displays the final video result.
-   */
   showCompletedState(result) {
     this.stopTimer();
     this.elements.statusPanel.classList.add('hidden');
-    this.elements.resultPanel.classList.remove('hidden');
 
-    this.elements.btnGenerate.disabled = false;
-    this.elements.btnGenerate.classList.remove('loading');
-    this.elements.btnGenerateText.textContent = 'Generate Video';
+    if (result.type === 'video') {
+      this.elements.btnGenerateVideo.disabled = false;
+      this.elements.btnGenerateVideo.classList.remove('loading');
+      this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
 
-    // Populate video
-    const video = this.elements.videoPlayer;
-    video.pause();
-    video.src = result.videoUrl;
-    video.load();
-    video.play().catch(() => {
-      // Autoplay with sound might be blocked, video plays muted
-      video.muted = true;
-      video.play().catch(() => {});
-    });
+      this.elements.resultPanel.classList.remove('hidden');
+      this.elements.imageResultPanel.classList.add('hidden');
 
-    // Populate metadata
-    this.elements.metaResolution.textContent = '512 × 512';
-    this.elements.metaDuration.textContent = '~2.0s (Looped)';
-    
-    const modelObj = CONFIG.MODELS.find(m => m.id === result.params.baseModel);
-    this.elements.metaModel.textContent = modelObj ? modelObj.name.split(' ')[0] : result.params.baseModel;
+      const video = this.elements.videoPlayer;
+      video.pause();
+      video.src = result.videoUrl;
+      video.load();
+      video.play().catch(() => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
 
-    const motionObj = CONFIG.MOTIONS.find(m => m.id === result.params.motion);
-    this.elements.metaMotion.textContent = motionObj ? motionObj.name : 'Natural';
+      this.elements.metaResolution.textContent = '512 × 512';
+      this.elements.metaDuration.textContent = '~2.0s (Looped)';
+      this.elements.metaModel.textContent = result.params.baseModel;
+      const motionObj = CONFIG.MOTIONS.find(m => m.id === result.params.motion);
+      this.elements.metaMotion.textContent = motionObj ? motionObj.name : 'Natural';
+      this.elements.metaSteps.textContent = `${result.params.steps} Steps (HD)`;
+      this.elements.metaTime.textContent = `${result.totalElapsedSeconds}s`;
 
-    this.elements.metaSteps.textContent = `${result.params.steps} Steps`;
-    this.elements.metaTime.textContent = `${result.totalElapsedSeconds}s`;
+      this.elements.resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      this.showToast('High-fidelity video synthesized successfully!', 'success');
 
-    this.elements.resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    this.showToast('Video synthesized successfully!', 'success');
+    } else {
+      this.elements.btnGenerateImage.disabled = false;
+      this.elements.btnGenerateImage.classList.remove('loading');
+      this.elements.btnGenerateImageText.textContent = 'Generate Image';
+
+      this.elements.imageResultPanel.classList.remove('hidden');
+      this.elements.resultPanel.classList.add('hidden');
+
+      this.elements.imagePreviewEl.src = result.blobUrl || result.imageUrl;
+      this.elements.imageMetaDimensions.textContent = `${result.width} × ${result.height}`;
+      this.elements.imageMetaModel.textContent = result.model.toUpperCase();
+      this.elements.imageMetaSeed.textContent = result.seed;
+      this.elements.imageMetaTime.textContent = `${result.totalElapsedSeconds}s`;
+
+      this.elements.imageResultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      this.showToast('High-resolution image rendered successfully!', 'success');
+    }
   }
 
-  /**
-   * UI transitions on error.
-   */
   showErrorState(errorMessage) {
     this.stopTimer();
-    this.elements.btnGenerate.disabled = false;
-    this.elements.btnGenerate.classList.remove('loading');
-    this.elements.btnGenerateText.textContent = 'Generate Video';
+    this.elements.btnGenerateVideo.disabled = false;
+    this.elements.btnGenerateVideo.classList.remove('loading');
+    this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
+
+    this.elements.btnGenerateImage.disabled = false;
+    this.elements.btnGenerateImage.classList.remove('loading');
+    this.elements.btnGenerateImageText.textContent = 'Generate Image';
 
     this.elements.statusOrb.className = 'status-orb error';
     this.elements.statusTitle.textContent = 'Generation Interrupted';
-    this.elements.statusSubtitle.textContent = errorMessage || 'The inference request could not be completed.';
+    this.elements.statusSubtitle.textContent = errorMessage || 'The request could not be completed. Automatically switching clusters...';
     this.elements.progressBar.style.width = '0%';
     this.elements.progressPercent.textContent = '0%';
-    this.elements.progressStepInfo.textContent = 'Error occurred';
-    this.elements.queueRankBadge.textContent = 'Failed';
-    this.elements.queueRankBadge.className = 'queue-badge error';
-
-    this.showToast(errorMessage || 'Generation failed', 'error');
+    this.showToast(errorMessage || 'Generation error', 'error');
   }
 
-  /**
-   * UI transitions on cancellation.
-   */
   showCancelledState() {
     this.stopTimer();
     this.elements.statusPanel.classList.add('hidden');
-    this.elements.btnGenerate.disabled = false;
-    this.elements.btnGenerate.classList.remove('loading');
-    this.elements.btnGenerateText.textContent = 'Generate Video';
+    this.elements.btnGenerateVideo.disabled = false;
+    this.elements.btnGenerateVideo.classList.remove('loading');
+    this.elements.btnGenerateVideoText.textContent = 'Generate Cinema Video';
+
+    this.elements.btnGenerateImage.disabled = false;
+    this.elements.btnGenerateImage.classList.remove('loading');
+    this.elements.btnGenerateImageText.textContent = 'Generate Image';
 
     this.showToast('Generation cancelled.', 'info');
   }
 
-  /**
-   * Toast notification display helper.
-   * @param {string} message - Toast message
-   * @param {'info'|'success'|'warning'|'error'} [type='info'] - Style category
-   * @param {number} [duration=4000] - Lifespan in ms
-   */
   showToast(message, type = 'info', duration = 4000) {
     const container = this.elements.toastContainer;
     if (!container) return;
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    
     let icon = 'ℹ️';
     if (type === 'success') icon = '✅';
     if (type === 'warning') icon = '⚠️';
@@ -603,33 +714,27 @@ export class UIManager {
 
     const dismiss = () => {
       toast.classList.add('fade-out');
-      setTimeout(() => {
-        if (toast.parentElement) toast.parentElement.removeChild(toast);
-      }, 300);
+      setTimeout(() => { if (toast.parentElement) toast.parentElement.removeChild(toast); }, 300);
     };
 
     toast.querySelector('.toast-close').addEventListener('click', dismiss);
     container.appendChild(toast);
-
     setTimeout(dismiss, duration);
   }
 
-  /**
-   * Collects current parameter values from form inputs.
-   */
-  getFormData() {
-    const prompt = this.elements.promptInput.value;
-    const selectedModelInput = this.elements.modelsContainer.querySelector('input[name="baseModel"]:checked');
-    const baseModel = selectedModelInput ? selectedModelInput.value : 'epiCRealism';
+  getVideoFormData() {
+    const prompt = this.elements.videoPromptInput.value;
+    const selectedModel = this.elements.modelsContainer.querySelector('input[name="baseModel"]:checked')?.value || 'epiCRealism';
     const motion = this.elements.motionSelect ? this.elements.motionSelect.value : '';
-    const selectedStepInput = this.elements.stepsContainer.querySelector('input[name="steps"]:checked');
-    const steps = selectedStepInput ? parseInt(selectedStepInput.value, 10) : 4;
+    const steps = parseInt(this.elements.stepsContainer.querySelector('input[name="videoSteps"]:checked')?.value || '8', 10);
+    return { prompt, baseModel: selectedModel, motion, steps, autoEnhance: true };
+  }
 
-    return {
-      prompt,
-      baseModel,
-      motion,
-      steps
-    };
+  getImageFormData() {
+    const prompt = this.elements.imagePromptInput.value;
+    const model = this.elements.imageModelsContainer.querySelector('input[name="imageModel"]:checked')?.value || 'flux';
+    const aspectRatio = this.elements.aspectRatiosContainer.querySelector('input[name="imageRatio"]:checked')?.value || '1:1';
+    const styleId = this.elements.imageStylesContainer?.querySelector('.style-pill-btn.active')?.dataset.styleId || '';
+    return { prompt, model, aspectRatio, styleId, enhance: true };
   }
 }

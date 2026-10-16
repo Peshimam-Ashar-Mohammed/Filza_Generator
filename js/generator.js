@@ -1,9 +1,10 @@
 /**
- * Filza Motion AI - Generator State Machine Orchestrator
+ * Filza Motion AI - Media Generator Orchestrator
+ * Coordinates both Video and Image generation state machines.
  */
 
-import { validateGenerationParams } from './validation.js';
-import { generateVideoWithStream } from './inference-client.js';
+import { validateVideoParams, validateImageParams } from './validation.js';
+import { generateVideoWithStream, generateImageDirect } from './inference-client.js';
 
 export const GENERATOR_STATE = {
   IDLE: 'idle',
@@ -14,14 +15,15 @@ export const GENERATOR_STATE = {
   CANCELLED: 'cancelled'
 };
 
-export class VideoGenerator {
+export class MediaGenerator {
   constructor(options = {}) {
+    this.mode = 'video'; // 'video' | 'image'
     this.state = GENERATOR_STATE.IDLE;
     this.currentJob = null;
     this.abortController = null;
     this.lastResult = null;
-    
-    // Callback hooks
+
+    // Hooks
     this.onStateChange = options.onStateChange || (() => {});
     this.onQueueStatus = options.onQueueStatus || (() => {});
     this.onProgress = options.onProgress || (() => {});
@@ -29,28 +31,28 @@ export class VideoGenerator {
     this.onError = options.onError || (() => {});
   }
 
-  /**
-   * Sets generator state and notifies listeners.
-   * @param {string} newState - One of GENERATOR_STATE values
-   * @param {Object} [payload] - Optional associated data
-   */
+  setMode(newMode) {
+    if (this.state === GENERATOR_STATE.QUEUED || this.state === GENERATOR_STATE.PROCESSING) {
+      this.cancelCurrentGeneration();
+    }
+    this.mode = newMode;
+    this.reset();
+  }
+
   _setState(newState, payload = {}) {
     this.state = newState;
-    this.onStateChange(this.state, payload);
+    this.onStateChange(this.state, { ...payload, mode: this.mode });
   }
 
   /**
-   * Initiates a new video generation job.
-   * @param {Object} rawParams - Parameters from UI input
-   * @returns {Promise<Object>} Completed generation result
+   * Generates video with quality enhancement and failover.
    */
-  async startGeneration(rawParams) {
+  async startVideoGeneration(rawParams) {
     if (this.state === GENERATOR_STATE.QUEUED || this.state === GENERATOR_STATE.PROCESSING) {
-      throw new Error('A video generation job is already in progress. Please wait or cancel it first.');
+      throw new Error('A generation is already in progress. Please wait or cancel.');
     }
 
-    // Validate inputs
-    const validation = validateGenerationParams(rawParams);
+    const validation = validateVideoParams(rawParams);
     if (!validation.isValid) {
       const err = new Error(validation.error);
       this._setState(GENERATOR_STATE.ERROR, { error: err.message });
@@ -63,12 +65,9 @@ export class VideoGenerator {
     const startTime = performance.now();
 
     this.currentJob = {
+      type: 'video',
       params,
-      startTime,
-      sessionHash: null,
-      eventId: null,
-      queueRank: null,
-      queueEta: null
+      startTime
     };
 
     this._setState(GENERATOR_STATE.QUEUED, { params });
@@ -80,51 +79,43 @@ export class VideoGenerator {
           signal: this.abortController.signal
         },
         {
-          onQueueJoined: ({ sessionHash, eventId }) => {
-            if (this.currentJob) {
-              this.currentJob.sessionHash = sessionHash;
-              this.currentJob.eventId = eventId;
-            }
+          onQueueJoined: (info) => {
+            if (this.currentJob) Object.assign(this.currentJob, info);
           },
-          onQueueEstimation: ({ rank, queueSize, etaSeconds }) => {
-            if (this.currentJob) {
-              this.currentJob.queueRank = rank;
-              this.currentJob.queueEta = etaSeconds;
-            }
-            this.onQueueStatus({ rank, queueSize, etaSeconds });
+          onQueueEstimation: (status) => {
+            this.onQueueStatus(status);
           },
           onProcessStart: () => {
             this._setState(GENERATOR_STATE.PROCESSING, { params });
           },
-          onProgress: (progressData) => {
-            this.onProgress(progressData);
+          onProgress: (progress) => {
+            this.onProgress(progress);
           }
         }
       );
 
       const totalElapsedSeconds = Math.round((performance.now() - startTime) / 100) / 10;
-      
-      const generationRecord = {
+      const record = {
+        type: 'video',
         videoUrl: result.videoUrl,
         videoPath: result.videoPath,
         serverDuration: result.durationSeconds,
         totalElapsedSeconds,
-        origName: result.origName,
         params,
+        clusterUsed: result.clusterUsed,
         timestamp: new Date().toISOString()
       };
 
-      this.lastResult = generationRecord;
-      this._setState(GENERATOR_STATE.COMPLETED, generationRecord);
-      this.onComplete(generationRecord);
-      return generationRecord;
+      this.lastResult = record;
+      this._setState(GENERATOR_STATE.COMPLETED, record);
+      this.onComplete(record);
+      return record;
 
     } catch (err) {
       if (this.abortController?.signal.aborted || err.message.includes('cancelled')) {
-        this._setState(GENERATOR_STATE.CANCELLED, { reason: 'User cancelled job' });
+        this._setState(GENERATOR_STATE.CANCELLED, { reason: 'User cancelled' });
         return null;
       }
-
       this._setState(GENERATOR_STATE.ERROR, { error: err.message });
       this.onError(err);
       throw err;
@@ -134,8 +125,71 @@ export class VideoGenerator {
   }
 
   /**
-   * Aborts currently active generation job.
+   * Generates high-res image via FLUX.1.
    */
+  async startImageGeneration(rawParams) {
+    if (this.state === GENERATOR_STATE.QUEUED || this.state === GENERATOR_STATE.PROCESSING) {
+      throw new Error('A generation is already in progress. Please wait or cancel.');
+    }
+
+    const validation = validateImageParams(rawParams);
+    if (!validation.isValid) {
+      const err = new Error(validation.error);
+      this._setState(GENERATOR_STATE.ERROR, { error: err.message });
+      this.onError(err);
+      throw err;
+    }
+
+    const params = validation.normalized;
+    this.abortController = new AbortController();
+    const startTime = performance.now();
+
+    this.currentJob = {
+      type: 'image',
+      params,
+      startTime
+    };
+
+    this._setState(GENERATOR_STATE.PROCESSING, { params });
+
+    try {
+      const result = await generateImageDirect({
+        ...params,
+        signal: this.abortController.signal
+      });
+
+      const totalElapsedSeconds = Math.round((performance.now() - startTime) / 100) / 10;
+      const record = {
+        type: 'image',
+        imageUrl: result.imageUrl,
+        blobUrl: result.blobUrl,
+        width: result.width,
+        height: result.height,
+        model: result.model,
+        seed: result.seed,
+        totalElapsedSeconds,
+        params,
+        timestamp: new Date().toISOString()
+      };
+
+      this.lastResult = record;
+      this._setState(GENERATOR_STATE.COMPLETED, record);
+      this.onComplete(record);
+      return record;
+
+    } catch (err) {
+      if (this.abortController?.signal.aborted || err.message.includes('cancelled')) {
+        this._setState(GENERATOR_STATE.CANCELLED, { reason: 'User cancelled' });
+        return null;
+      }
+      this._setState(GENERATOR_STATE.ERROR, { error: err.message });
+      this.onError(err);
+      throw err;
+    } finally {
+      this.abortController = null;
+    }
+  }
+
   cancelCurrentGeneration() {
     if (this.abortController) {
       this.abortController.abort();
@@ -144,9 +198,6 @@ export class VideoGenerator {
     }
   }
 
-  /**
-   * Resets generator back to IDLE state.
-   */
   reset() {
     if (this.abortController) {
       this.cancelCurrentGeneration();

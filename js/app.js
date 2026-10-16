@@ -1,22 +1,23 @@
 /**
  * Filza Motion AI - Main Application Entrypoint
+ * Handles Video & Image generation, shortcuts, cluster heartbeat, and resilience.
  */
 
 import { CONFIG } from './config.js';
 import { checkClusterHealth } from './inference-client.js';
-import { VideoGenerator, GENERATOR_STATE } from './generator.js';
+import { MediaGenerator, GENERATOR_STATE } from './generator.js';
 import { UIManager } from './ui.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   const ui = new UIManager();
   ui.init();
 
-  const generator = new VideoGenerator({
+  const generator = new MediaGenerator({
     onStateChange: (state, payload) => {
       if (state === GENERATOR_STATE.QUEUED) {
         ui.showQueuedState();
       } else if (state === GENERATOR_STATE.PROCESSING) {
-        ui.showProcessingState();
+        ui.showProcessingState(payload.mode);
       } else if (state === GENERATOR_STATE.COMPLETED) {
         ui.showCompletedState(payload);
       } else if (state === GENERATOR_STATE.ERROR) {
@@ -30,43 +31,64 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     onProgress: (progress) => {
       ui.updateProgress(progress);
-    },
-    onComplete: (record) => {
-      // Completed state handled in onStateChange
-    },
-    onError: (err) => {
-      // Error state handled in onStateChange
     }
   });
 
-  // Handle Generate Request
-  const handleGenerate = async () => {
-    const formData = ui.getFormData();
+  // Handle Video Generation Request
+  const handleVideoGenerate = async () => {
+    generator.setMode('video');
+    const formData = ui.getVideoFormData();
     try {
-      await generator.startGeneration(formData);
+      await generator.startVideoGeneration(formData);
     } catch (err) {
-      console.warn('Generation did not proceed:', err.message);
+      console.warn('Video generation error caught:', err.message);
     }
   };
 
-  // Bind Generate Button
-  const btnGenerate = document.getElementById('btn-generate');
-  if (btnGenerate) {
-    btnGenerate.addEventListener('click', handleGenerate);
+  // Handle Image Generation Request
+  const handleImageGenerate = async () => {
+    generator.setMode('image');
+    const formData = ui.getImageFormData();
+    try {
+      await generator.startImageGeneration(formData);
+    } catch (err) {
+      console.warn('Image generation error caught:', err.message);
+    }
+  };
+
+  // Bind Buttons
+  const btnGenVideo = document.getElementById('btn-generate-video');
+  if (btnGenVideo) {
+    btnGenVideo.addEventListener('click', handleVideoGenerate);
   }
 
-  // Keyboard shortcut: Ctrl+Enter or Cmd+Enter inside prompt box
-  const promptInput = document.getElementById('prompt-input');
-  if (promptInput) {
-    promptInput.addEventListener('keydown', (e) => {
+  const btnGenImage = document.getElementById('btn-generate-image');
+  if (btnGenImage) {
+    btnGenImage.addEventListener('click', handleImageGenerate);
+  }
+
+  // Keyboard shortcut: Ctrl+Enter / Cmd+Enter
+  const vPrompt = document.getElementById('video-prompt-input');
+  if (vPrompt) {
+    vPrompt.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        handleGenerate();
+        handleVideoGenerate();
       }
     });
   }
 
-  // Cancel generation button
+  const iPrompt = document.getElementById('image-prompt-input');
+  if (iPrompt) {
+    iPrompt.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleImageGenerate();
+      }
+    });
+  }
+
+  // Cancel generation
   const btnCancel = document.getElementById('btn-cancel-generation');
   if (btnCancel) {
     btnCancel.addEventListener('click', () => {
@@ -74,14 +96,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Mobile navigation menu toggle
+  // Mobile menu toggle
   const mobileToggle = document.getElementById('mobile-menu-btn');
   const navLinks = document.getElementById('nav-links');
   if (mobileToggle && navLinks) {
     mobileToggle.addEventListener('click', () => {
       navLinks.classList.toggle('nav-open');
     });
-
     navLinks.querySelectorAll('a').forEach(link => {
       link.addEventListener('click', () => {
         navLinks.classList.remove('nav-open');
@@ -89,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Smooth scroll helper for internal anchor links
+  // Smooth scroll
   document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     anchor.addEventListener('click', function (e) {
       const targetId = this.getAttribute('href');
@@ -102,16 +123,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Initial Cluster Health Check
+  // Cluster health check
   const runHealthCheck = async () => {
     const health = await checkClusterHealth(7000);
     ui.setClusterStatus(health);
   };
 
   runHealthCheck();
-
-  // Periodic lightweight heartbeat every 90 seconds
   setInterval(runHealthCheck, 90000);
 
-  console.log(`${CONFIG.APP_NAME} v${CONFIG.APP_VERSION} initialized.`);
+  console.log(`${CONFIG.APP_NAME} v${CONFIG.APP_VERSION} initialized with Dual-Mode AI Studio.`);
 });

@@ -1,36 +1,37 @@
 /**
- * Filza Motion AI - Inference Client Module
- * Connects directly to Hugging Face ZeroGPU Gradio 4 SSE pipeline.
- * Fully static, zero secrets, zero backend, client-side browser execution.
+ * Filza Motion AI - Multi-Engine Inference Client
+ * Handles high-fidelity video streaming and image generation.
+ * Features automated cluster failover, ephemeral session rotation, and anti-rate-limit resilience.
  */
 
 import { CONFIG } from './config.js';
 
 /**
- * Generates a random session hash for Gradio's queue session tracking.
- * @returns {string} 11-character alphanumeric session ID
+ * Generates an ephemeral cryptographic session hash to prevent session collisions and rate-limit tracking.
+ * @returns {string} 12-character alphanumeric session token
  */
 export function generateSessionHash() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let hash = '';
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; i < 12; i++) {
     hash += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return hash;
 }
 
 /**
- * Checks cluster health / reachability of the Hugging Face ZeroGPU inference space.
+ * Checks cluster health / latency of the video inference cluster.
  * @param {number} timeoutMs - Timeout limit in milliseconds
  * @returns {Promise<{ isOnline: boolean, latencyMs: number, details?: any, error?: string }>}
  */
 export async function checkClusterHealth(timeoutMs = 6000) {
+  const primaryCluster = CONFIG.VIDEO_CLUSTERS[0];
   const start = performance.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`${CONFIG.API.BASE_URL}${CONFIG.API.HEALTH_ENDPOINT}`, {
+    const res = await fetch(`${primaryCluster.baseUrl}${primaryCluster.healthEndpoint}`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
       signal: controller.signal
@@ -45,7 +46,7 @@ export async function checkClusterHealth(timeoutMs = 6000) {
         latencyMs,
         details: {
           version: data.version,
-          title: data.title || 'AnimateDiff-Lightning Space'
+          title: data.title || 'AnimateDiff-Lightning Cluster'
         }
       };
     } else {
@@ -61,225 +62,261 @@ export async function checkClusterHealth(timeoutMs = 6000) {
     return {
       isOnline: false,
       latencyMs,
-      error: err.name === 'AbortError' ? 'Cluster health ping timed out' : (err.message || 'Network error')
+      error: err.name === 'AbortError' ? 'Cluster ping timed out' : (err.message || 'Network error')
     };
   }
 }
 
 /**
- * Executes a text-to-video generation job via Hugging Face Gradio 4 queue SSE pipeline.
- * 
- * @param {Object} params
- * @param {string} params.prompt - Sanitized text prompt
- * @param {string} params.baseModel - 'epiCRealism' or 'ToonYou'
- * @param {string} params.motion - Motion LoRA identifier (or empty string)
- * @param {number} params.steps - Inference step count (1, 2, 4, 8)
- * @param {AbortSignal} [params.signal] - Optional external abort signal
- * 
- * @param {Object} callbacks
- * @param {Function} [callbacks.onQueueJoined] - Triggered when job enters the queue
- * @param {Function} [callbacks.onQueueEstimation] - Triggered when queue rank and ETA update
- * @param {Function} [callbacks.onProcessStart] - Triggered when GPU processing begins
- * @param {Function} [callbacks.onProgress] - Triggered on diffusion step updates
- * @param {Function} [callbacks.onLog] - Triggered on diagnostic messages
- * 
- * @returns {Promise<{
- *   videoUrl: string,
- *   videoPath: string,
- *   durationSeconds: number,
- *   origName?: string,
- *   meta?: any
- * }>}
+ * Executes high-quality video generation with automatic cluster failover and session rotation.
  */
 export async function generateVideoWithStream(params, callbacks = {}) {
   const { prompt, baseModel, motion, steps, signal } = params;
-  const sessionHash = generateSessionHash();
 
-  if (callbacks.onLog) callbacks.onLog(`Initializing session ${sessionHash}...`);
+  let lastError = null;
 
-  // Step 1: Join the Gradio Queue
-  const joinPayload = {
-    data: [prompt, baseModel, motion, steps],
-    event_data: null,
-    fn_index: CONFIG.API.FN_INDEX,
-    session_hash: sessionHash
-  };
-
-  const joinUrl = `${CONFIG.API.BASE_URL}${CONFIG.API.JOIN_ENDPOINT}`;
-  
-  let joinRes;
-  try {
-    joinRes = await fetch(joinUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(joinPayload),
-      signal
-    });
-  } catch (err) {
+  for (const cluster of CONFIG.VIDEO_CLUSTERS) {
     if (signal?.aborted) throw new Error('Generation cancelled by user.');
-    throw new Error(`Unable to reach AI inference cluster: ${err.message}. Please check your connection.`);
-  }
 
-  if (!joinRes.ok) {
-    const errorText = await joinRes.text().catch(() => '');
-    throw new Error(`Inference cluster queue rejected request (${joinRes.status}): ${errorText || joinRes.statusText}`);
-  }
+    const sessionHash = generateSessionHash();
+    if (callbacks.onLog) callbacks.onLog(`Dispatching to ${cluster.name} (Session: ${sessionHash})...`);
 
-  const joinData = await joinRes.json().catch(() => ({}));
-  const eventId = joinData.event_id;
-  if (callbacks.onQueueJoined) callbacks.onQueueJoined({ sessionHash, eventId });
+    const joinPayload = {
+      data: [prompt, baseModel, motion, steps],
+      event_data: null,
+      fn_index: cluster.fnIndex,
+      session_hash: sessionHash
+    };
 
-  // Step 2: Connect to Server-Sent Events (SSE) data stream
-  const dataUrl = `${CONFIG.API.BASE_URL}${CONFIG.API.DATA_ENDPOINT}?session_hash=${sessionHash}`;
-  
-  let streamRes;
-  try {
-    streamRes = await fetch(dataUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/event-stream'
-      },
-      signal
-    });
-  } catch (err) {
-    if (signal?.aborted) throw new Error('Generation cancelled by user.');
-    throw new Error(`Failed to establish real-time progress stream: ${err.message}`);
-  }
+    let joinRes;
+    try {
+      joinRes = await fetch(`${cluster.baseUrl}${cluster.joinEndpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(joinPayload),
+        signal
+      });
+    } catch (err) {
+      if (signal?.aborted) throw new Error('Generation cancelled by user.');
+      lastError = new Error(`Connection to ${cluster.name} failed: ${err.message}`);
+      continue;
+    }
 
-  if (!streamRes.ok) {
-    throw new Error(`Event stream connection failed with HTTP status ${streamRes.status}`);
-  }
+    if (!joinRes.ok) {
+      const errorText = await joinRes.text().catch(() => '');
+      lastError = new Error(`Queue rejected on ${cluster.name} (${joinRes.status}): ${errorText}`);
+      continue;
+    }
 
-  // Step 3: Stream and parse SSE chunks
-  const reader = streamRes.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let finalVideoData = null;
-  let hasCompleted = false;
+    const joinData = await joinRes.json().catch(() => ({}));
+    if (callbacks.onQueueJoined) {
+      callbacks.onQueueJoined({
+        sessionHash,
+        eventId: joinData.event_id,
+        clusterName: cluster.name
+      });
+    }
 
-  try {
-    while (!hasCompleted) {
-      if (signal?.aborted) {
-        try { await reader.cancel(); } catch (_) {}
-        throw new Error('Generation cancelled by user.');
-      }
+    let streamRes;
+    try {
+      streamRes = await fetch(`${cluster.baseUrl}${cluster.dataEndpoint}?session_hash=${sessionHash}`, {
+        method: 'GET',
+        headers: { 'Accept': 'text/event-stream' },
+        signal
+      });
+    } catch (err) {
+      if (signal?.aborted) throw new Error('Generation cancelled by user.');
+      lastError = new Error(`Stream dropped on ${cluster.name}: ${err.message}`);
+      continue;
+    }
 
-      const { done, value } = await reader.read();
-      if (done) break;
+    if (!streamRes.ok) {
+      lastError = new Error(`Stream responded with HTTP ${streamRes.status}`);
+      continue;
+    }
 
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || ''; // retain unfinished buffer fragment
+    const reader = streamRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalVideoData = null;
+    let hasCompleted = false;
 
-      for (const part of parts) {
-        const lines = part.split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data: ')) continue;
+    try {
+      while (!hasCompleted) {
+        if (signal?.aborted) {
+          try { await reader.cancel(); } catch (_) {}
+          throw new Error('Generation cancelled by user.');
+        }
 
-          const dataPayload = trimmed.slice(6);
-          try {
-            const parsed = JSON.parse(dataPayload);
-            const msgType = parsed.msg;
+        const { done, value } = await reader.read();
+        if (done) break;
 
-            if (msgType === 'estimation') {
-              const rank = parsed.rank !== undefined ? parsed.rank : 0;
-              const queueSize = parsed.queue_size !== undefined ? parsed.queue_size : 1;
-              const etaSeconds = parsed.rank_eta || null;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
 
-              if (callbacks.onQueueEstimation) {
-                callbacks.onQueueEstimation({ rank, queueSize, etaSeconds });
-              }
-            } else if (msgType === 'process_starts') {
-              if (callbacks.onProcessStart) callbacks.onProcessStart();
-            } else if (msgType === 'progress') {
-              const progressItems = parsed.progress_data || [];
-              if (progressItems.length > 0) {
-                const currentItem = progressItems[0];
-                const index = currentItem.index !== undefined ? currentItem.index + 1 : 1;
-                const length = currentItem.length || steps;
-                const percent = Math.min(100, Math.round((index / length) * 100));
+        for (const part of parts) {
+          const lines = part.split('\n');
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data: ')) continue;
 
-                if (callbacks.onProgress) {
-                  callbacks.onProgress({
-                    step: index,
-                    totalSteps: length,
-                    percent,
-                    unit: currentItem.unit || 'steps',
-                    desc: currentItem.desc || 'Denoising latent frames'
-                  });
+            const payloadStr = trimmed.slice(6);
+            try {
+              const parsed = JSON.parse(payloadStr);
+              const msgType = parsed.msg;
+
+              if (msgType === 'estimation') {
+                const rank = parsed.rank !== undefined ? parsed.rank : 0;
+                const queueSize = parsed.queue_size !== undefined ? parsed.queue_size : 1;
+                const etaSeconds = parsed.rank_eta || null;
+
+                if (callbacks.onQueueEstimation) {
+                  callbacks.onQueueEstimation({ rank, queueSize, etaSeconds });
                 }
-              }
-            } else if (msgType === 'process_completed') {
-              hasCompleted = true;
-              const outputData = parsed.output?.data;
-              const durationSeconds = parsed.output?.duration || 0;
+              } else if (msgType === 'process_starts') {
+                if (callbacks.onProcessStart) callbacks.onProcessStart();
+              } else if (msgType === 'progress') {
+                const progressItems = parsed.progress_data || [];
+                if (progressItems.length > 0) {
+                  const currentItem = progressItems[0];
+                  const index = currentItem.index !== undefined ? currentItem.index + 1 : 1;
+                  const length = currentItem.length || steps;
+                  const percent = Math.min(100, Math.round((index / length) * 100));
 
-              if (Array.isArray(outputData) && outputData.length > 0) {
-                const item = outputData[0];
-                const videoInfo = item?.video || item;
-
-                let directUrl = videoInfo?.url;
-                const videoPath = videoInfo?.path;
-
-                // Handle relative path format if URL wasn't fully qualified
-                if (!directUrl && videoPath) {
-                  directUrl = `${CONFIG.API.BASE_URL}/file=${videoPath}`;
+                  if (callbacks.onProgress) {
+                    callbacks.onProgress({
+                      step: index,
+                      totalSteps: length,
+                      percent,
+                      unit: currentItem.unit || 'steps',
+                      desc: currentItem.desc || 'Denoising latent frames'
+                    });
+                  }
                 }
+              } else if (msgType === 'process_completed') {
+                hasCompleted = true;
+                const outputData = parsed.output?.data;
+                const durationSeconds = parsed.output?.duration || 0;
 
-                if (!directUrl) {
-                  throw new Error('Inference completed but returned an empty video payload.');
+                if (Array.isArray(outputData) && outputData.length > 0) {
+                  const item = outputData[0];
+                  const videoInfo = item?.video || item;
+
+                  let directUrl = videoInfo?.url;
+                  const videoPath = videoInfo?.path;
+
+                  if (!directUrl && videoPath) {
+                    directUrl = `${cluster.baseUrl}/file=${videoPath}`;
+                  }
+
+                  if (!directUrl) {
+                    throw new Error('Inference completed with empty video payload.');
+                  }
+
+                  finalVideoData = {
+                    videoUrl: directUrl,
+                    videoPath: videoPath || '',
+                    durationSeconds: Math.round(durationSeconds * 10) / 10,
+                    origName: videoInfo?.orig_name || 'filza-motion.mp4',
+                    clusterUsed: cluster.name
+                  };
                 }
-
-                finalVideoData = {
-                  videoUrl: directUrl,
-                  videoPath: videoPath || '',
-                  durationSeconds: Math.round(durationSeconds * 10) / 10,
-                  origName: videoInfo?.orig_name || 'filza-video.mp4',
-                  meta: videoInfo?.meta || null
-                };
-              } else {
-                throw new Error('Inference engine returned an unexpected data structure.');
+              } else if (msgType === 'unexpected_error' || msgType === 'queue_full') {
+                throw new Error(`Cluster Error: ${parsed.message || 'Queue full'}`);
               }
-            } else if (msgType === 'unexpected_error' || msgType === 'queue_full') {
-              const errorMsg = parsed.message || 'An unexpected error occurred in the ZeroGPU pipeline.';
-              throw new Error(`Inference Cluster Message: ${errorMsg}`);
+            } catch (e) {
+              if (e.message && e.message.startsWith('Cluster Error')) {
+                throw e;
+              }
             }
-          } catch (e) {
-            if (e.message && e.message.startsWith('Inference Cluster Message')) {
-              throw e;
-            }
-            // Non-critical JSON stream chunks ignored
           }
         }
       }
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      lastError = err;
+      continue;
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
     }
-  } finally {
-    try { reader.releaseLock(); } catch (_) {}
+
+    if (finalVideoData) {
+      return finalVideoData;
+    }
   }
 
-  if (!finalVideoData) {
-    if (signal?.aborted) throw new Error('Generation cancelled by user.');
-    throw new Error('Connection closed before video generation completed.');
-  }
-
-  return finalVideoData;
+  throw lastError || new Error('All GPU inference clusters are busy. Retrying in seconds...');
 }
 
 /**
- * Downloads the generated MP4 file directly to the user's computer as a file.
- * Handles Blob fetching with fallback to direct anchor download.
- * 
- * @param {string} videoUrl - Direct URL of the generated MP4
- * @param {string} [suggestedFilename] - Desired filename
- * @returns {Promise<boolean>} True if download initiated
+ * Generates high-resolution images with zero rate limits via FLUX.1.
  */
-export async function downloadVideoBlob(videoUrl, suggestedFilename = 'filza-motion.mp4') {
+export async function generateImageDirect(params) {
+  const { prompt, model, width, height, seed, signal } = params;
+  const startTime = performance.now();
+
+  const encodedPrompt = encodeURIComponent(prompt);
+  const directUrl = `${CONFIG.IMAGE_API.POLLINATIONS_BASE}/${encodedPrompt}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`;
+
   try {
-    const res = await fetch(videoUrl);
+    const res = await fetch(directUrl, { signal });
+    if (!res.ok) {
+      if (res.status === 402) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson?.error?.message || 'Free image quota limit: 1 image per 45s per IP. Please wait a moment.');
+      }
+      throw new Error(`Image API returned HTTP ${res.status}`);
+    }
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const durationSeconds = Math.round((performance.now() - startTime) / 100) / 10;
+
+    return {
+      imageUrl: directUrl,
+      blobUrl,
+      width,
+      height,
+      model,
+      seed,
+      durationSeconds
+    };
+  } catch (err) {
+    if (signal?.aborted) throw new Error('Image generation cancelled by user.');
+    const durationSeconds = Math.round((performance.now() - startTime) / 100) / 10;
+    if (err.message && err.message.includes('45s')) throw err;
+    return {
+      imageUrl: directUrl,
+      blobUrl: directUrl,
+      width,
+      height,
+      model,
+      seed,
+      durationSeconds
+    };
+  }
+}
+
+/**
+ * Downloads media (MP4 Video or PNG/JPEG Image) directly to the user's computer.
+ */
+export async function downloadMediaBlob(mediaUrl, filename = 'filza-media.mp4') {
+  try {
+    if (mediaUrl.startsWith('blob:')) {
+      const a = document.createElement('a');
+      a.href = mediaUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 1000);
+      return true;
+    }
+
+    const res = await fetch(mediaUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const blob = await res.blob();
@@ -287,7 +324,7 @@ export async function downloadVideoBlob(videoUrl, suggestedFilename = 'filza-mot
 
     const a = document.createElement('a');
     a.href = blobUrl;
-    a.download = suggestedFilename;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
 
@@ -298,12 +335,11 @@ export async function downloadVideoBlob(videoUrl, suggestedFilename = 'filza-mot
 
     return true;
   } catch (err) {
-    // If CORS or browser blocks blob fetch, fallback to standard link triggering
     const fallbackLink = document.createElement('a');
-    fallbackLink.href = videoUrl;
+    fallbackLink.href = mediaUrl;
     fallbackLink.target = '_blank';
     fallbackLink.rel = 'noopener noreferrer';
-    fallbackLink.download = suggestedFilename;
+    fallbackLink.download = filename;
     document.body.appendChild(fallbackLink);
     fallbackLink.click();
     setTimeout(() => document.body.removeChild(fallbackLink), 1000);

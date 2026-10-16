@@ -1,9 +1,8 @@
 /**
- * Automated tests for validation module
+ * Automated tests for validation & prompt supercharging module (v1.2)
  */
 
-import { validatePrompt, validateGenerationParams, escapeHtml } from '../js/validation.js';
-import { CONFIG } from '../js/config.js';
+import { validatePrompt, validateVideoParams, validateImageParams, enhancePrompt, escapeHtml } from '../js/validation.js';
 
 let passed = 0;
 let failed = 0;
@@ -18,53 +17,54 @@ function assert(condition, message) {
   }
 }
 
-console.log('--- Testing Validation Module ---');
+console.log('--- Testing Validation & Prompt Enhancer Module ---');
 
-// Test 1: Empty prompt
-const emptyCheck = validatePrompt('');
-assert(emptyCheck.isValid === false, 'Rejects empty prompt string');
-assert(emptyCheck.charCount === 0, 'Reports 0 char count for empty prompt');
+// Test 1: Empty and short prompts
+assert(validatePrompt('').isValid === false, 'Rejects empty prompt string');
+assert(validatePrompt('  ').isValid === false, 'Rejects whitespace string');
+assert(validatePrompt('ab').isValid === false, 'Rejects string < 3 chars');
 
-// Test 2: Whitespace only prompt
-const wsCheck = validatePrompt('     ');
-assert(wsCheck.isValid === false, 'Rejects whitespace-only prompt');
+// Test 2: HTML Escaping
+const xss = '<img src=x onerror=alert(1)>&"';
+const esc = escapeHtml(xss);
+assert(!esc.includes('<img'), 'Escapes tag syntax');
+assert(esc.includes('&lt;img'), 'Converts to &lt;img');
 
-// Test 3: Too short prompt (< 3 chars)
-const shortCheck = validatePrompt('hi');
-assert(shortCheck.isValid === false, 'Rejects prompt below MIN_PROMPT_LENGTH (2 chars)');
-assert(shortCheck.error.includes('too short'), 'Returns helpful length error');
+// Test 3: Prompt Enhancer (Video)
+const rawVideoPrompt = 'a soaring eagle';
+const enhancedVideo = enhancePrompt(rawVideoPrompt, 'video');
+assert(enhancedVideo.includes('a soaring eagle'), 'Preserves original prompt');
+assert(enhancedVideo.includes('8k resolution') || enhancedVideo.includes('photorealistic'), 'Injects cinematic resolution modifiers');
+assert(enhancedVideo.includes('smooth'), 'Injects motion smoothness keywords');
 
-// Test 4: Oversized prompt (> 500 chars)
-const longStr = 'a'.repeat(CONFIG.LIMITS.MAX_PROMPT_LENGTH + 50);
-const longCheck = validatePrompt(longStr);
-assert(longCheck.isValid === false, 'Rejects prompt exceeding MAX_PROMPT_LENGTH');
-assert(longCheck.charCount === 550, 'Tracks accurate char count');
+// Test 4: Prompt Enhancer (Image Styles)
+const rawImagePrompt = 'futuristic city';
+const enhancedAnime = enhancePrompt(rawImagePrompt, 'image', 'anime');
+assert(enhancedAnime.includes('Studio Ghibli') || enhancedAnime.includes('anime'), 'Injects anime style keywords');
 
-// Test 5: Valid prompt
-const validPrompt = 'A majestic golden eagle soaring over snow peaks at dusk';
-const validCheck = validatePrompt(validPrompt);
-assert(validCheck.isValid === true, 'Accepts valid prompt');
-assert(validCheck.sanitized === validPrompt, 'Preserves sanitized text');
-assert(validCheck.error === null, 'Error is null on valid prompt');
-
-// Test 6: HTML Escaping
-const xssPayload = '<script>alert("xss")</script>&"\'';
-const escaped = escapeHtml(xssPayload);
-assert(!escaped.includes('<script>'), 'Escapes opening tag');
-assert(escaped.includes('&lt;script&gt;'), 'Converts to &lt;script&gt;');
-assert(escaped.includes('&amp;'), 'Escapes ampersand');
-
-// Test 7: Parameter Normalization
-const paramsCheck = validateGenerationParams({
-  prompt: 'A futuristic floating city at sunrise',
-  baseModel: 'invalidModelName',
-  motion: 'invalidMotion',
-  steps: 99
+// Test 5: Video Parameter Normalization
+const vParams = validateVideoParams({
+  prompt: 'A sleek sports car drifting in rain',
+  baseModel: 'unknown_model',
+  motion: 'unknown_motion',
+  steps: 999
 });
-assert(paramsCheck.isValid === true, 'Normalizes parameters when prompt is valid');
-assert(paramsCheck.normalized.baseModel === 'epiCRealism', 'Falls back to default model for invalid model ID');
-assert(paramsCheck.normalized.motion === '', 'Falls back to default motion for invalid motion ID');
-assert(paramsCheck.normalized.steps === 4, 'Falls back to default 4 steps for invalid step count');
+assert(vParams.isValid === true, 'Accepts valid video prompt');
+assert(vParams.normalized.baseModel === 'epiCRealism', 'Falls back to default model');
+assert(vParams.normalized.steps === 8, 'Defaults to 8 Steps HD');
+assert(vParams.normalized.prompt.includes('drifting'), 'Contains original prompt');
+assert(vParams.normalized.prompt.includes('cinematic'), 'Auto-enhances with cinematic keywords');
+
+// Test 6: Image Parameter Normalization
+const iParams = validateImageParams({
+  prompt: 'A cyberpunk cat with cyber goggles',
+  model: 'unknown_model',
+  aspectRatio: '16:9'
+});
+assert(iParams.isValid === true, 'Accepts valid image prompt');
+assert(iParams.normalized.model === 'flux', 'Falls back to FLUX.1 model');
+assert(iParams.normalized.width === 1280 && iParams.normalized.height === 720, 'Assigns 16:9 dimensions');
+assert(typeof iParams.normalized.seed === 'number', 'Assigns valid seed');
 
 console.log(`Validation Tests completed: ${passed} passed, ${failed} failed.\n`);
 if (failed > 0) process.exit(1);

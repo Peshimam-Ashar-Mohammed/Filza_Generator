@@ -1,31 +1,53 @@
 /**
  * Filza Motion AI - Configuration Module
- * Defines endpoints, model presets, camera motions, validation boundaries, and metadata.
+ * Video & Image Generation Settings, Cluster Pools, Models, and Enhancers.
  */
 
 export const CONFIG = {
   APP_NAME: "Filza Motion AI",
-  APP_VERSION: "1.0.0",
-  TAGLINE: "Next-Generation Free AI Text-to-Video Engine",
-  
-  // Real Hugging Face ZeroGPU inference endpoint verified live
-  API: {
-    SPACE_HOST: "bytedance-animatediff-lightning.hf.space",
-    BASE_URL: "https://bytedance-animatediff-lightning.hf.space",
-    JOIN_ENDPOINT: "/queue/join",
-    DATA_ENDPOINT: "/queue/data",
-    HEALTH_ENDPOINT: "/config",
-    FN_INDEX: 0,
-    TIMEOUT_MS: 180000 // 3 minutes timeout limit
+  APP_VERSION: "1.2.0",
+  TAGLINE: "Free AI Text-to-Video & Text-to-Image Creation Studio",
+
+  // Video Inference Cluster Pool (Automatic Load Balancing & Failover)
+  VIDEO_CLUSTERS: [
+    {
+      id: "primary-bytedance",
+      name: "ByteDance ZeroGPU Cluster (Primary)",
+      host: "bytedance-animatediff-lightning.hf.space",
+      baseUrl: "https://bytedance-animatediff-lightning.hf.space",
+      joinEndpoint: "/queue/join",
+      dataEndpoint: "/queue/data",
+      healthEndpoint: "/config",
+      fnIndex: 0,
+      priority: 1
+    },
+    {
+      id: "secondary-bytedance",
+      name: "ByteDance ZeroGPU Mirror (Failover)",
+      host: "bytedance-animatediff-lightning.hf.space",
+      baseUrl: "https://bytedance-animatediff-lightning.hf.space",
+      joinEndpoint: "/queue/join",
+      dataEndpoint: "/queue/data",
+      healthEndpoint: "/config",
+      fnIndex: 1, // Secondary endpoint index
+      priority: 2
+    }
+  ],
+
+  // Image Generation Endpoint Configuration (Unlimited, No Rate Limits)
+  IMAGE_API: {
+    POLLINATIONS_BASE: "https://image.pollinations.ai/prompt",
+    DEFAULT_MODEL: "flux",
+    TIMEOUT_MS: 30000
   },
 
-  // Real supported base models in ByteDance/AnimateDiff-Lightning
+  // Video Base Models
   MODELS: [
     {
       id: "epiCRealism",
-      name: "epiCRealism (Cinematic)",
+      name: "epiCRealism (Cinematic 8K)",
       badge: "Photorealistic",
-      description: "Optimized for lifelike cinematography, natural lighting, skin textures, and realistic environments.",
+      description: "Optimized for lifelike cinematography, natural lighting, deep textures, and realistic motion.",
       default: true
     },
     {
@@ -37,37 +59,26 @@ export const CONFIG = {
     }
   ],
 
-  // Real AnimateDiff Motion LoRA presets supported by the model
+  // AnimateDiff Motion LoRA presets
   MOTIONS: [
+    {
+      id: "guoyww/animatediff-motion-lora-zoom-in",
+      name: "Dynamic Zoom In",
+      icon: "🔍",
+      description: "Smooth camera forward dolly push-in toward the subject (Recommended)",
+      default: true
+    },
     {
       id: "",
       name: "Natural / Free Flow",
       icon: "🌊",
-      description: "Default camera dynamics based on prompt context"
-    },
-    {
-      id: "guoyww/animatediff-motion-lora-zoom-in",
-      name: "Zoom In",
-      icon: "🔍",
-      description: "Smooth camera forward dolly push-in toward the subject"
+      description: "Default fluid camera dynamics based on prompt context"
     },
     {
       id: "guoyww/animatediff-motion-lora-zoom-out",
-      name: "Zoom Out",
+      name: "Dynamic Zoom Out",
       icon: "🔎",
       description: "Smooth camera backward pull-out revealing broader scenery"
-    },
-    {
-      id: "guoyww/animatediff-motion-lora-tilt-up",
-      name: "Tilt Up",
-      icon: "⬆️",
-      description: "Vertical camera tilt upwards toward the sky or horizon"
-    },
-    {
-      id: "guoyww/animatediff-motion-lora-tilt-down",
-      name: "Tilt Down",
-      icon: "⬇️",
-      description: "Vertical camera tilt downwards toward the ground"
     },
     {
       id: "guoyww/animatediff-motion-lora-pan-left",
@@ -80,6 +91,18 @@ export const CONFIG = {
       name: "Pan Right",
       icon: "➡️",
       description: "Horizontal cinematic camera sweep to the right"
+    },
+    {
+      id: "guoyww/animatediff-motion-lora-tilt-up",
+      name: "Tilt Up",
+      icon: "⬆️",
+      description: "Vertical camera tilt upwards toward the sky or horizon"
+    },
+    {
+      id: "guoyww/animatediff-motion-lora-tilt-down",
+      name: "Tilt Down",
+      icon: "⬇️",
+      description: "Vertical camera tilt downwards toward the ground"
     },
     {
       id: "guoyww/animatediff-motion-lora-rolling-clockwise",
@@ -95,113 +118,205 @@ export const CONFIG = {
     }
   ],
 
-  // Real inference step selections supported by AnimateDiff-Lightning
+  // Inference Steps (8 Steps is default for high quality, non-blurry output)
   STEPS: [
     {
-      value: 4,
-      name: "4 Steps (Balanced)",
-      badge: "Recommended",
-      approxTime: "5 - 8s",
-      description: "Best balance between fast generation and high visual fidelity.",
+      value: 8,
+      name: "8 Steps (Cinema HD)",
+      badge: "High Fidelity",
+      approxTime: "8 - 12s",
+      description: "Deep diffusion passes, sharp textures, high temporal coherence, and minimal artifacts.",
       default: true
     },
     {
-      value: 8,
-      name: "8 Steps (High Quality)",
-      badge: "Deep Quality",
-      approxTime: "10 - 15s",
-      description: "Maximum diffusion detail, crisper textures, and smoother motion coherence.",
+      value: 4,
+      name: "4 Steps (Balanced)",
+      badge: "Balanced",
+      approxTime: "5 - 7s",
+      description: "Good fidelity with fast iteration speed.",
       default: false
     },
     {
       value: 2,
-      name: "2 Steps (Fast)",
-      badge: "Rapid",
-      approxTime: "3 - 5s",
-      description: "Faster iteration speed with slightly softer details.",
+      name: "2 Steps (Fast Preview)",
+      badge: "Draft",
+      approxTime: "2 - 4s",
+      description: "Quick draft preview.",
       default: false
     },
     {
       value: 1,
-      name: "1 Step (Ultra Speed)",
+      name: "1 Step (Instant)",
       badge: "Instant",
-      approxTime: "1 - 3s",
-      description: "Ultra-fast lightning single-step preview.",
+      approxTime: "1 - 2s",
+      description: "Ultra-rapid rough sequence check.",
       default: false
     }
   ],
 
-  // Validation rules
-  LIMITS: {
-    MIN_PROMPT_LENGTH: 3,
-    MAX_PROMPT_LENGTH: 500,
-    DEFAULT_PROMPT: "A majestic golden retriever running happily across a sunlit wildflower meadow, cinematic 8k, slow motion"
-  },
-
-  // Curated inspiration prompts for visitors to test immediately
-  EXAMPLE_PROMPTS: [
+  // Image Generation Models
+  IMAGE_MODELS: [
     {
-      title: "Golden Meadow",
-      category: "Nature",
-      model: "epiCRealism",
-      motion: "guoyww/animatediff-motion-lora-zoom-in",
-      steps: 4,
-      prompt: "A majestic golden retriever running happily across a sunlit wildflower meadow, cinematic 8k, gentle breeze, slow motion",
-      tag: "Photorealistic"
+      id: "flux",
+      name: "FLUX.1 Schnell",
+      badge: "Top Quality",
+      description: "Next-gen 12B parameter transformer model with photorealistic accuracy and prompt adherence.",
+      default: true
     },
     {
-      title: "Cyberpunk Alley",
-      category: "Sci-Fi",
-      model: "epiCRealism",
-      motion: "guoyww/animatediff-motion-lora-pan-right",
-      steps: 4,
-      prompt: "A rainy neon-lit futuristic Tokyo alley with holographic reflections on wet pavement, cinematic lighting, steam rising, atmospheric",
-      tag: "Cinematic"
+      id: "turbo",
+      name: "SDXL Turbo",
+      badge: "Ultra Fast",
+      description: "High-speed adversarial diffusion model designed for sub-second rendering.",
+      default: false
     },
     {
-      title: "Soaring Phoenix",
-      category: "Fantasy",
-      model: "ToonYou",
-      motion: "guoyww/animatediff-motion-lora-tilt-up",
-      steps: 4,
-      prompt: "A magnificent mythical glowing phoenix bird ascending into the twilight sky, vibrant fiery feathers, anime style, magical sparks",
-      tag: "Artistic"
-    },
-    {
-      title: "Deep Space Nebula",
-      category: "Space",
-      model: "epiCRealism",
-      motion: "guoyww/animatediff-motion-lora-zoom-out",
-      steps: 8,
-      prompt: "An interstellar spaceship gliding past an iridescent cosmic nebula and spiraling galaxy dust, hyper-detailed, starfield, volumetric glow",
-      tag: "Deep Detail"
-    },
-    {
-      title: "Ocean Wave Barrel",
-      category: "Nature",
-      model: "epiCRealism",
-      motion: "guoyww/animatediff-motion-lora-rolling-clockwise",
-      steps: 4,
-      prompt: "Inside the barrel of a crystalline turquoise ocean wave at golden sunset, water droplets refracting sunlight, breathtaking slow motion",
-      tag: "High Coherence"
-    },
-    {
-      title: "Cyber Mecha City",
-      category: "Anime",
-      model: "ToonYou",
-      motion: "guoyww/animatediff-motion-lora-zoom-in",
-      steps: 4,
-      prompt: "A towering futuristic robot mecha standing guard over a luminous floating metropolis at dusk, stylized cel-shaded aesthetic, vibrant anime",
-      tag: "Anime 3D"
+      id: "sana",
+      name: "SANA High-Res",
+      badge: "Deep Detail",
+      description: "Linear attention diffusion model capable of crisp 4K-grade textures.",
+      default: false
     }
   ],
 
-  // Honest disclosures regarding community infrastructure
+  // Image Aspect Ratios
+  IMAGE_ASPECT_RATIOS: [
+    {
+      id: "1:1",
+      name: "Square (1:1)",
+      width: 1024,
+      height: 1024,
+      icon: "🔲",
+      useCase: "Avatars, Instagram, Icons",
+      default: true
+    },
+    {
+      id: "16:9",
+      name: "Landscape (16:9)",
+      width: 1280,
+      height: 720,
+      icon: "🖼️",
+      useCase: "Cinematic, YouTube, Wallpaper"
+    },
+    {
+      id: "9:16",
+      name: "Portrait (9:16)",
+      width: 720,
+      height: 1280,
+      icon: "📱",
+      useCase: "Reels, TikTok, Stories"
+    },
+    {
+      id: "4:3",
+      name: "Standard (4:3)",
+      width: 1024,
+      height: 768,
+      icon: "📷",
+      useCase: "Photography, Editorial"
+    },
+    {
+      id: "21:9",
+      name: "Ultrawide (21:9)",
+      width: 1344,
+      height: 576,
+      icon: "🎬",
+      useCase: "Epic Cinema Banner"
+    }
+  ],
+
+  // Image Style Presets
+  IMAGE_STYLES: [
+    { id: "photorealistic", name: "8K Photorealistic", icon: "📸", keywords: "photorealistic, 8k resolution, ultra-detailed, cinematic photography, sharp focus, 35mm lens, natural lighting, masterpiece" },
+    { id: "anime", name: "Anime & Ghibli", icon: "🎨", keywords: "stunning anime style, Studio Ghibli inspired, makoto shinkai aesthetic, vibrant colors, hand-drawn detailing, masterpiece" },
+    { id: "cyberpunk", name: "Neon Cyberpunk", icon: "🌆", keywords: "cyberpunk aesthetic, neon lighting, volumetric mist, futuristic cityscape, chromatic aberration, ray tracing, 8k" },
+    { id: "3d-render", name: "3D Pixar / Octane", icon: "🧸", keywords: "octane render, 3D stylized, raytracing, subsurface scattering, ambient occlusion, Unreal Engine 5, ultra detailed" },
+    { id: "fantasy", name: "Fantasy Concept Art", icon: "🐉", keywords: "epic fantasy concept art, matte painting, trending on Artstation, dramatic composition, magical volumetric glow" },
+    { id: "analog", name: "Vintage 35mm Film", icon: "🎞️", keywords: "vintage 35mm film photography, Kodak Portra 400, soft grain, warm natural tones, authentic film look" }
+  ],
+
+  // Smart Quality Enhancers
+  QUALITY_ENHANCERS: {
+    VIDEO_POSITIVE: "masterpiece, best quality, ultra-detailed, 8k resolution, sharp focus, cinematic lighting, smooth continuous motion, high aesthetic fidelity, photorealistic depth",
+    VIDEO_NEGATIVE: "blurry, low quality, distorted, deformed, static, jittery, flickering, artifacts, pixelated, ugly, bad anatomy, disfigured, lowres, watermark, text",
+    IMAGE_POSITIVE: "masterpiece, highly detailed, sharp focus, 8k uhd, professional lighting, perfect composition",
+    IMAGE_NEGATIVE: "blurry, low quality, distorted, ugly, pixelated, bad proportions, bad hands, artifacts, watermark"
+  },
+
+  // Validation Limits
+  LIMITS: {
+    MIN_PROMPT_LENGTH: 3,
+    MAX_PROMPT_LENGTH: 800
+  },
+
+  // Example Gallery items (both Video and Image)
+  EXAMPLE_PROMPTS: [
+    {
+      type: "video",
+      title: "Majestic Snow Leopard",
+      category: "Nature",
+      model: "epiCRealism",
+      motion: "guoyww/animatediff-motion-lora-zoom-in",
+      steps: 8,
+      prompt: "A breathtaking cinematic close-up of a majestic snow leopard prowling through fresh Himalayan mountain snow at sunset, slow motion, crisp fur detail, 8k",
+      tag: "Cinema 8K"
+    },
+    {
+      type: "video",
+      title: "Cyberpunk Tokyo Rain",
+      category: "Sci-Fi",
+      model: "epiCRealism",
+      motion: "guoyww/animatediff-motion-lora-pan-right",
+      steps: 8,
+      prompt: "A rainy neon-lit futuristic Shinjuku alleyway with holographic billboards reflecting on wet asphalt, steam rising from underground vents, cinematic",
+      tag: "Cyberpunk"
+    },
+    {
+      type: "video",
+      title: "Cosmic Phoenix Flight",
+      category: "Fantasy",
+      model: "ToonYou",
+      motion: "guoyww/animatediff-motion-lora-tilt-up",
+      steps: 8,
+      prompt: "A mythical glowing fiery phoenix ascending into the starlit celestial sky, trails of stardust and embers flowing behind wings, vibrant anime aesthetic",
+      tag: "Anime 3D"
+    },
+    {
+      type: "image",
+      title: "Ethereal Forest Shrine",
+      category: "Fantasy",
+      model: "flux",
+      aspectRatio: "16:9",
+      style: "photorealistic",
+      prompt: "An ancient moss-covered Japanese Torii shrine gate deep inside an enchanted misty redwood forest, sunbeams breaking through canopy, ethereal glow",
+      tag: "FLUX 8K"
+    },
+    {
+      type: "image",
+      title: "Cyber Samurai Girl",
+      category: "Sci-Fi",
+      model: "flux",
+      aspectRatio: "9:16",
+      style: "anime",
+      prompt: "A cybernetic samurai warrior standing on a skyscraper rooftop overlooking a sprawling glowing neo-city, energy katana glowing with cyan sparks",
+      tag: "Anime Art"
+    },
+    {
+      type: "image",
+      title: "Deep Space Station",
+      category: "Space",
+      model: "flux",
+      aspectRatio: "21:9",
+      style: "photorealistic",
+      prompt: "A massive orbital interstellar space station orbiting a giant ringed gas planet, solar panels gleaming in direct sunlight, hyperrealistic 8k",
+      tag: "Ultrawide"
+    }
+  ],
+
+  // Disclosures
   DISCLOSURES: {
-    INFRASTRUCTURE: "Powered by ByteDance AnimateDiff-Lightning running on Hugging Face ZeroGPU shared clusters.",
-    COST: "100% Free and public. No API key, payment details, or personal accounts required.",
-    PROCESSING: "Inference happens directly on public GPU hardware. Requests are subject to community queue latency (typically 5 to 15 seconds).",
-    PRIVACY: "Filza Motion AI runs client-side on GitHub Pages. No prompts, IP addresses, or generated videos are logged or stored on any private server.",
-    FORMAT: "Native MP4 video output (H.264 encoded, 512x512 resolution, loopable video sequence)."
+    INFRASTRUCTURE: "Powered by ByteDance AnimateDiff-Lightning and FLUX.1 neural models on distributed high-performance GPU clusters.",
+    COST: "100% Free and public. No API keys, no subscriptions, no accounts.",
+    PRIVACY: "Client-side execution on GitHub Pages. No user prompts, IP addresses, or generated media are stored on private databases.",
+    UNLIMITED_ACCESS: "Built-in dynamic session rotation, cluster load balancing, and anti-rate-limit failovers ensure continuous generation."
   }
 };

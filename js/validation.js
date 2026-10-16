@@ -1,5 +1,5 @@
 /**
- * Filza Motion AI - Input Validation & Sanitization Module
+ * Filza Motion AI - Input Validation & Quality Prompt Supercharger
  */
 
 import { CONFIG } from './config.js';
@@ -38,7 +38,7 @@ export function validatePrompt(rawPrompt) {
       isValid: false,
       sanitized: '',
       charCount: 0,
-      error: 'Please enter a description for the video you want to generate.',
+      error: 'Please enter a description for your generation.',
       warning: null
     };
   }
@@ -61,7 +61,7 @@ export function validatePrompt(rawPrompt) {
       isValid: false,
       sanitized: trimmed,
       charCount,
-      error: `Prompt is too short. Please use at least ${CONFIG.LIMITS.MIN_PROMPT_LENGTH} characters for better AI visual comprehension.`,
+      error: `Prompt is too short. Please use at least ${CONFIG.LIMITS.MIN_PROMPT_LENGTH} characters for better visual fidelity.`,
       warning: null
     };
   }
@@ -77,9 +77,8 @@ export function validatePrompt(rawPrompt) {
   }
 
   let warning = null;
-  // Check for ultra-short single-word prompt
   if (trimmed.split(/\s+/).length < 2) {
-    warning = 'Tip: Adding lighting, environment, or motion details (e.g. "cinematic, sunset, slow motion") yields significantly higher quality results.';
+    warning = 'Tip: Adding lighting, environment, or motion details yields significantly higher quality results.';
   }
 
   return {
@@ -92,20 +91,62 @@ export function validatePrompt(rawPrompt) {
 }
 
 /**
- * Validates and normalizes generation parameters.
+ * Supercharges a prompt with cinematic quality keywords and visual stabilization tags.
+ * Solves low-quality/blurry outputs by anchoring the diffusion latents.
+ * 
+ * @param {string} prompt - Raw user prompt
+ * @param {'video'|'image'} [mode='video'] - Target media type
+ * @param {string} [styleId=''] - Optional style identifier
+ * @returns {string} Enhanced high-fidelity prompt
+ */
+export function enhancePrompt(prompt, mode = 'video', styleId = '') {
+  const trimmed = (prompt || '').trim();
+  if (!trimmed) return '';
+
+  let enhancementKeywords = '';
+  
+  if (mode === 'video') {
+    enhancementKeywords = 'cinematic 8k resolution, photorealistic, masterpiece, smooth fluid motion, sharp focus, beautiful natural lighting, high frame coherence';
+  } else {
+    const styleObj = CONFIG.IMAGE_STYLES.find(s => s.id === styleId);
+    if (styleObj) {
+      enhancementKeywords = styleObj.keywords;
+    } else {
+      enhancementKeywords = 'masterpiece, 8k uhd, highly detailed, photorealistic, professional studio lighting, perfect composition, sharp focus';
+    }
+  }
+
+  const lower = trimmed.toLowerCase();
+  const additions = [];
+  
+  enhancementKeywords.split(',').map(k => k.trim()).forEach(keyword => {
+    if (!lower.includes(keyword.toLowerCase())) {
+      additions.push(keyword);
+    }
+  });
+
+  if (additions.length === 0) return trimmed;
+  return `${trimmed}, ${additions.slice(0, 8).join(', ')}`;
+}
+
+/**
+ * Validates and normalizes video generation parameters.
  * @param {Object} params - Raw parameters
  * @returns {{
  *   isValid: boolean,
  *   normalized: {
  *     prompt: string,
+ *     rawPrompt: string,
+ *     negativePrompt: string,
  *     baseModel: string,
  *     motion: string,
- *     steps: number
+ *     steps: number,
+ *     autoEnhance: boolean
  *   },
  *   error: string|null
  * }}
  */
-export function validateGenerationParams(params = {}) {
+export function validateVideoParams(params = {}) {
   const promptCheck = validatePrompt(params.prompt);
   if (!promptCheck.isValid) {
     return {
@@ -115,32 +156,101 @@ export function validateGenerationParams(params = {}) {
     };
   }
 
-  // Validate Base Model
   const validModelIds = CONFIG.MODELS.map(m => m.id);
   const baseModel = validModelIds.includes(params.baseModel)
     ? params.baseModel
     : (CONFIG.MODELS.find(m => m.default)?.id || validModelIds[0]);
 
-  // Validate Motion LoRA
   const validMotionIds = CONFIG.MOTIONS.map(m => m.id);
   const motion = validMotionIds.includes(params.motion)
     ? params.motion
-    : '';
+    : (CONFIG.MOTIONS.find(m => m.default)?.id || '');
 
-  // Validate Steps
   const validSteps = CONFIG.STEPS.map(s => s.value);
   const numericSteps = parseInt(params.steps, 10);
   const steps = validSteps.includes(numericSteps)
     ? numericSteps
-    : (CONFIG.STEPS.find(s => s.default)?.value || 4);
+    : (CONFIG.STEPS.find(s => s.default)?.value || 8);
+
+  const autoEnhance = params.autoEnhance !== false;
+  let finalPrompt = promptCheck.sanitized;
+  if (autoEnhance) {
+    finalPrompt = enhancePrompt(finalPrompt, 'video');
+  }
+
+  const negativePrompt = (params.negativePrompt || CONFIG.QUALITY_ENHANCERS.VIDEO_NEGATIVE).trim();
 
   return {
     isValid: true,
     normalized: {
-      prompt: promptCheck.sanitized,
+      prompt: finalPrompt,
+      rawPrompt: promptCheck.sanitized,
+      negativePrompt,
       baseModel,
       motion,
-      steps
+      steps,
+      autoEnhance
+    },
+    error: null
+  };
+}
+
+/**
+ * Validates and normalizes image generation parameters.
+ * @param {Object} params - Raw parameters
+ * @returns {{
+ *   isValid: boolean,
+ *   normalized: {
+ *     prompt: string,
+ *     rawPrompt: string,
+ *     model: string,
+ *     width: number,
+ *     height: number,
+ *     aspectRatio: string,
+ *     seed: number,
+ *     enhance: boolean
+ *   },
+ *   error: string|null
+ * }}
+ */
+export function validateImageParams(params = {}) {
+  const promptCheck = validatePrompt(params.prompt);
+  if (!promptCheck.isValid) {
+    return {
+      isValid: false,
+      normalized: null,
+      error: promptCheck.error
+    };
+  }
+
+  const ratioObj = CONFIG.IMAGE_ASPECT_RATIOS.find(r => r.id === params.aspectRatio) ||
+    CONFIG.IMAGE_ASPECT_RATIOS.find(r => r.default) ||
+    CONFIG.IMAGE_ASPECT_RATIOS[0];
+
+  const modelIds = CONFIG.IMAGE_MODELS.map(m => m.id);
+  const model = modelIds.includes(params.model) ? params.model : CONFIG.IMAGE_API.DEFAULT_MODEL;
+
+  const seed = (params.seed !== undefined && params.seed !== null && !isNaN(params.seed))
+    ? Math.floor(Math.abs(parseInt(params.seed, 10)))
+    : Math.floor(Math.random() * 2147483647);
+
+  const enhance = params.enhance !== false;
+  let finalPrompt = promptCheck.sanitized;
+  if (enhance) {
+    finalPrompt = enhancePrompt(finalPrompt, 'image', params.styleId);
+  }
+
+  return {
+    isValid: true,
+    normalized: {
+      prompt: finalPrompt,
+      rawPrompt: promptCheck.sanitized,
+      model,
+      width: ratioObj.width,
+      height: ratioObj.height,
+      aspectRatio: ratioObj.id,
+      seed,
+      enhance
     },
     error: null
   };
